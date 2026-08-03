@@ -1,3 +1,8 @@
+-- @lib: dicom
+-- @category: datasource
+-- @desc: DICOM 医疗影像 19 tag 解析（Explicit VR LE），单文件→扁平行，目录→多行
+-- @source: original（duckdb-luajit 系列）
+-- @requires: none
 -- DICOM tag parser for duckdb-luajit (LuaJIT 5.1, no string.unpack)
 -- Explicit VR Little Endian. Returns one flat "|"-joined row per file.
 -- Usage (luajit_table, table mode): source returns function(list_str) → rows[]

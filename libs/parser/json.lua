@@ -1,3 +1,8 @@
+-- @lib: json
+-- @category: parser
+-- @desc: JSON 解析/编码（纯 Lua）
+-- @source: vendored https://github.com/rxi/json.lua (MIT, rxi 2020)
+-- @requires: none
 --
 -- json.lua
 --

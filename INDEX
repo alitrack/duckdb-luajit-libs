@@ -1,0 +1,4 @@
+dicom|libs/datasource/dicom.lua
+dirscan|libs/datasource/dirscan.lua
+export|libs/export/export.lua
+json|libs/parser/json.lua

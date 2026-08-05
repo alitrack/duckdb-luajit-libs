@@ -10,6 +10,7 @@ DuckDB 的 Lua 库仓库：**一条 SQL 从仓库加载函数/表函数**，无�
 | 目录 | 定位 | 示例 |
 |---|---|---|
 | `libs/datasource/` | **数据源**——读文件/目录/格式，补 DuckDB 读不了的数据 | dicom（医疗影像）、dirscan（目录元数据） |
+| `libs/export/` | **导出**——存储过程式 COPY 导出（query/表 → parquet/csv/json） | export（Lua 里一条 COPY TO） |
 | `libs/parser/` | **解析器**——数据结构/文本解析（JSON/CSV/XML…） | json（vendored rxi/json.lua） |
 | `libs/udf/` | **标量函数**——算法/编码/数学/字符串 UDF | （规划：hash、base64、sentencepiece） |
 | `libs/network/` | **网络/API**——HTTP/签名/私域 API 数据源 | （规划：signed-api、http 抓取） |
@@ -21,6 +22,7 @@ DuckDB 的 Lua 库仓库：**一条 SQL 从仓库加载函数/表函数**，无�
 |---|---|---|---|
 | `libs/datasource/dicom.lua` | datasource | DICOM 医疗影像 19 tag（Explicit VR LE） | 无 |
 | `libs/datasource/dirscan.lua` | datasource | 目录扫描：文件类型 + EXIF（相机/时间）+ PDF /Info | 无 |
+| `libs/export/export.lua` | export | 存储过程式导出：`export({query|tbl, file, format})` → COPY TO parquet/csv/json | 无（需普通模式，_duckdb_call） |
 | `libs/parser/json.lua` | parser | JSON 解析/编码（[rxi/json.lua](https://github.com/rxi/json.lua)，MIT） | 无 |
 
 ## 一条 SQL 安装协议

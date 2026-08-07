@@ -12,6 +12,7 @@ Works with [duckdb-luajit](https://github.com/alitrack/duckdb-luajit). Formats D
 |---|---|---|
 | `libs/datasource/` | **Data sources** — read files/dirs/formats DuckDB cannot | dicom (medical imaging), dirscan (directory metadata) |
 | `libs/export/` | **Export** — stored-procedure style COPY export (query/table → parquet/csv/json) | export (one COPY TO in Lua) |
+| `libs/etl/` | **ETL flow layer** — audit log, idempotent load validation, error self-healing, componentized SQL | etl (audit/validate/safe/q) |
 | `libs/parser/` | **Parsers** — data structures / text (JSON/CSV/XML…) | json (vendored rxi/json.lua) |
 | `libs/udf/` | **Scalar UDFs** — algorithms / encodings / math / string | base64, crc32, uuid, html_escape |
 | `libs/network/` | **Network/API** — HTTP / signed / private API data sources | (planned: signed-api, http fetch) |
@@ -32,6 +33,7 @@ Works with [duckdb-luajit](https://github.com/alitrack/duckdb-luajit). Formats D
 | `libs/udf/html_escape.lua` | udf | HTML entity escape/unescape | none |
 | `libs/mcp/` (mcp-server.sql + sudoku.lua) | mcp | DuckDB as MCP server exposing Lua UDFs to AI (duckdb_mcp + luajit) | duckdb_mcp ext |
 | `libs/mcp/sudoku.lua` | mcp | Sudoku solver (81-char puzzle → solution, anchor-verified) — module-table lib: install then `compile` a wrapper UDF | none |
+| `libs/etl/etl.lua` | etl | ETL flow layer: audit log (`etl.log`/`etl.run`), idempotent load validation (`etl.validate`), error self-healing (`etl.safe`/`etl.insert_auto`), componentized SQL (`etl.q`/`etl.query`) — needs normal mode (non-trusted) for `_duckdb_call`/`_duckdb_query` | none |
 
 ## One-SQL Install Protocol (v0.31+ recommended: `install` / `list_remote`)
 
@@ -62,6 +64,11 @@ SELECT * FROM luajit_module(mode := 'compile', sql_name := 'sudoku_solve',
 SELECT luajit_s('sudoku_solve',
   '000001002000020030004500600007600050080090006100005800001004000070900003400030020');
 -- → 359461782716829534824573619947682351583197246162345897631254978275918463498736125
+
+-- ETL flow layer (module-table lib, needs normal mode for _duckdb_call/_duckdb_query):
+SELECT * FROM luajit_module(mode := 'install', sql_name := 'etl');
+SELECT * FROM luajit_module(mode := 'compile', sql_name := 'etl_demo',
+  source := 'return function(x) etl.init(); etl.log(1, ''demo'', ''{"k":"v"}'', 3, 1, true, nil); return etl.validate(''t_src'', ''throw_if_empty'') end');
 ```
 
 > **v0.30 and earlier**: the `quick_compile` protocol (removed) — `SET VARIABLE src = (SELECT content FROM read_text('https://raw.githubusercontent.com/alitrack/duckdb-luajit-libs/main/libs/<cat>/<lib>.lua'))` + `luajit_module(mode := 'quick_compile', sql_name := 'x', source := getvariable('src'))`.

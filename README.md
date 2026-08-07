@@ -29,18 +29,29 @@ DuckDB 的 Lua 库仓库：**一条 SQL 从仓库加载函数/表函数**，无�
 | `libs/udf/uuid.lua` | udf | UUID v4 生成（math.random，非加密级） | LuaJIT bit |
 | `libs/udf/html_escape.lua` | udf | HTML 实体转义/反转义 | 无 |
 
-## 一条 SQL 安装协议
+## 一条 SQL 安装协议（v0.31+ 推荐：`install` / `list_remote`）
+
+duckdb-luajit **v0.31 起内置包管理**——`luajit_module` 新增 `install` / `list_remote` 模式，从本仓库按 INDEX 拉库、缓存到 `~/.duckdb/luajit-libs/`、自动注册，免手写拉取 SQL：
 
 ```sql
 LOAD 'luajit';
--- 1. 从仓库拉 Lua 库（read_text 支持 https）
-SET VARIABLE src = (SELECT content FROM read_text(
-  'https://raw.githubusercontent.com/alitrack/duckdb-luajit-libs/main/libs/datasource/dicom.lua'));
--- 2. 注册为函数（库 + 调用包装；库尾部是 return function(...) 时可直接编译）
-SELECT message FROM luajit_module(mode := 'quick_compile', sql_name := 'dicom', source := getvariable('src'));
--- 3. 表函数直接用（luajit_table 无参调用，库内 io.popen 兜底列目录）
-SELECT count(*) FROM luajit_table(getvariable('src'));
+
+-- 0. 看仓库里有哪些库（INDEX 协议，自动缓存）
+SELECT * FROM luajit_module(mode := 'list_remote');
+-- → available libs: dicom / dirscan / export / json / base64 / crc32 / uuid / html_escape
+
+-- 1. 一条 SQL 装库并注册（标量 UDF 直接可调用）
+SELECT * FROM luajit_module(mode := 'install', sql_name := 'base64');
+-- → installed 'base64' (UDF) — cached at ~/.duckdb/luajit-libs/base64.lua
+
+-- 2. 立即使用（注册名直调）
+SELECT luajit_s('base64', 'hello');  -- → aGVsbG8=
+
+-- 表函数类库（dicom/dirscan）装完直接当 source 用
+SELECT * FROM luajit_table('dicom', list := '文件路径');
 ```
+
+> **v0.30 及更早**：`quick_compile` 协议（已移除）——`SET VARIABLE src = (SELECT content FROM read_text('https://raw.githubusercontent.com/alitrack/duckdb-luajit-libs/main/libs/<cat>/<lib>.lua'))` + `luajit_module(mode := 'quick_compile', sql_name := 'x', source := getvariable('src'))`。
 
 ## 贡献一个库（分类规则）
 
@@ -56,5 +67,5 @@ SELECT count(*) FROM luajit_table(getvariable('src'));
 
 - **纯 Lua 库直接可用**；带 C 依赖的（lpeg/luasocket/lua-cjson）需要 FFI 桥或
   系统 .so——纯 Lua 替代优先（如 json 用 rxi 纯 Lua 版，非 lua-cjson）
-- 安装协议目前是"拉源码 + quick_compile"（免包管理器）；依赖管理（require 链）
+- 安装协议 = `install`/`list_remote`（内置包管理，INDEX 索引 + 本地缓存）；依赖管理（require 链）
   靠"单文件自包含"约定解决

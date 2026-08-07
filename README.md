@@ -41,7 +41,7 @@ LOAD 'luajit';
 
 -- 0. List available libs (INDEX protocol, cached automatically)
 SELECT * FROM luajit_module(mode := 'list_remote');
--- → available libs: dicom / dirscan / export / json / base64 / crc32 / uuid / html_escape
+-- → available libs: dicom / dirscan / export / json / base64 / crc32 / uuid / html_escape / sudoku
 
 -- 1. Install & register with one statement (scalar UDFs callable right away)
 SELECT * FROM luajit_module(mode := 'install', sql_name := 'base64');
@@ -52,6 +52,15 @@ SELECT luajit_s('base64', 'hello');  -- → aGVsbG8=
 
 -- Table-function libs (dicom/dirscan) work as source right after install
 SELECT * FROM luajit_table('dicom', list := '<file path>');
+
+-- Module-table libs (e.g. sudoku): install registers the global module,
+-- then wrap it with a one-liner UDF before calling:
+SELECT * FROM luajit_module(mode := 'install', sql_name := 'sudoku');
+SELECT * FROM luajit_module(mode := 'compile', sql_name := 'sudoku_solve',
+  source := 'return function(x) return sudoku.solve(x) end');
+SELECT luajit_s('sudoku_solve',
+  '000001002000020030004500600007600050080090006100005800001004000070900003400030020');
+-- → 359461782716829534824573619947682351583197246162345897631254978275918463498736125
 ```
 
 > **v0.30 and earlier**: the `quick_compile` protocol (removed) — `SET VARIABLE src = (SELECT content FROM read_text('https://raw.githubusercontent.com/alitrack/duckdb-luajit-libs/main/libs/<cat>/<lib>.lua'))` + `luajit_module(mode := 'quick_compile', sql_name := 'x', source := getvariable('src'))`.

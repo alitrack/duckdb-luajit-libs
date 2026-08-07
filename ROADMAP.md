@@ -8,7 +8,7 @@
 
 - [x] 仓库建立 + 五类目录：datasource / parser / udf / network / ffi
 - [x] 库头部元数据规范（`@lib/@category/@desc/@source/@requires`）
-- [x] 安装协议验证：`read_text(URL)` + `quick_compile` / `luajit_table`
+- [x] 安装协议验证：`luajit_module(install / list_remote)`（v0.31+ 内置包管理，INDEX 索引 + 本地缓存）
 - [x] 首批库：dicom、dirscan（datasource）、json vendored（parser）
 - [x] 第三方纯 Lua 库可用性验证（rxi/json.lua 实测）
 
@@ -23,7 +23,7 @@
 
 ## Phase 2 — 安装体验（工程化）
 
-- [ ] **安装宏**：`CREATE MACRO install_lib(name)` 封装 3 行 SQL（拉取→注册）
+- [x] **安装宏**：内置 `install`/`list_remote` 取代手工 3 行 SQL（v0.31 落地，已实测）
 - [ ] **版本管理**：元数据加 `@version`，read_text 按 tag/commit 锁定版本
 - [ ] **CI 校验**（libs 仓库）：Lua 语法检查 + 元数据格式校验 + 安装协议冒烟测试
       （拉库→编译→调用，全自动）
@@ -35,6 +35,8 @@
 - [ ] **FFI 绑定文档化**：dcmtk（DICOM 解码）、open62541（OPC UA 物联网）——
       绑定模式写成参考（extern "C" 或纯 C 库）
 - [ ] **network 类**：signed-api（已有 demo）入库、http 抓取（ffi curl 已证明）
+- [x] **MCP 集成配方**（2026-08-07 实测）：luajit UDF 发布成 MCP tool（duckdb_mcp + luajit），
+      AI 助手可调用 SQL 里的 Lua 能力——`libs/mcp/` 分类，init SQL + 验证步骤
 - [ ] **贡献规范落地**：PR 模板 + CI 门禁（元数据/语法/冒烟必过）
 - [ ] duckdb-luajit 主仓库 README 宣传 libs 模式（联合入口）
 

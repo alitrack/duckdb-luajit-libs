@@ -17,6 +17,7 @@ English README: [README.md](README.md)
 | `libs/udf/` | **标量函数**——算法/编码/数学/字符串 UDF | base64、crc32、uuid、html_escape |
 | `libs/network/` | **网络/API**——HTTP/签名/私域 API 数据源 | （规划：signed-api、http 抓取） |
 | `libs/ffi/` | **FFI 绑定**——系统 C 库（dcmtk/open62541…） | （规划：需 extern "C" 或纯 C 库） |
+| `libs/mcp/` | **MCP 集成**——DuckDB 作为 MCP server，把 Lua UDF 发布成 tools 给 AI 助手调用 | mcp-server（sudoku_solve 示例） |
 
 ## 库索引
 
@@ -30,6 +31,7 @@ English README: [README.md](README.md)
 | `libs/udf/crc32.lua` | udf | CRC-32 校验和（IEEE 802.3，8 位大写 hex） | LuaJIT bit |
 | `libs/udf/uuid.lua` | udf | UUID v4 生成（math.random，非加密级） | LuaJIT bit |
 | `libs/udf/html_escape.lua` | udf | HTML 实体转义/反转义 | 无 |
+| `libs/mcp/` (mcp-server.sql + sudoku.lua) | mcp | DuckDB 作为 MCP server 暴露 Lua UDF 给 AI（duckdb_mcp + luajit 合体） | duckdb_mcp 扩展 |
 
 ## 一条 SQL 安装协议（v0.31+ 推荐：`install` / `list_remote`）
 

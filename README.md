@@ -16,6 +16,7 @@ Works with [duckdb-luajit](https://github.com/alitrack/duckdb-luajit). Formats D
 | `libs/udf/` | **Scalar UDFs** — algorithms / encodings / math / string | base64, crc32, uuid, html_escape |
 | `libs/network/` | **Network/API** — HTTP / signed / private API data sources | (planned: signed-api, http fetch) |
 | `libs/ffi/` | **FFI bindings** — system C libraries (dcmtk/open62541…) | (planned: needs extern "C" or pure-C lib) |
+| `libs/mcp/` | **MCP integration** — DuckDB as MCP server exposing Lua UDFs as tools to AI assistants | mcp-server (sudoku_solve demo) |
 
 ## Library Index
 
@@ -29,6 +30,7 @@ Works with [duckdb-luajit](https://github.com/alitrack/duckdb-luajit). Formats D
 | `libs/udf/crc32.lua` | udf | CRC-32 checksum (IEEE 802.3, 8-digit uppercase hex) | LuaJIT bit |
 | `libs/udf/uuid.lua` | udf | UUID v4 generation (math.random, non-crypto) | LuaJIT bit |
 | `libs/udf/html_escape.lua` | udf | HTML entity escape/unescape | none |
+| `libs/mcp/` (mcp-server.sql + sudoku.lua) | mcp | DuckDB as MCP server exposing Lua UDFs to AI (duckdb_mcp + luajit) | duckdb_mcp ext |
 
 ## One-SQL Install Protocol (v0.31+ recommended: `install` / `list_remote`)
 

@@ -1,0 +1,4 @@
+{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"test-client","version":"1.0.0"}}}
+{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}
+{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"sudoku_solve","arguments":{"puzzle":"000001002000020030004500600007600050080090006100005800001004000070900003400030020"}}}
+{"jsonrpc":"2.0","id":99,"method":"shutdown","params":{}}

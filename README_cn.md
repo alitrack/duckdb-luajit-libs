@@ -32,6 +32,7 @@ English README: [README.md](README.md)
 | `libs/udf/uuid.lua` | udf | UUID v4 生成（math.random，非加密级） | LuaJIT bit |
 | `libs/udf/html_escape.lua` | udf | HTML 实体转义/反转义 | 无 |
 | `libs/mcp/` (mcp-server.sql + sudoku.lua) | mcp | DuckDB 作为 MCP server 暴露 Lua UDF 给 AI（duckdb_mcp + luajit 合体） | duckdb_mcp 扩展 |
+| `libs/mcp/sudoku.lua` | mcp | 数独求解器（81 位题面 → 解，锚点验证）——模块表库：install 后 compile 包装成 UDF | 无 |
 
 ## 一条 SQL 安装协议（v0.31+ 推荐：`install` / `list_remote`）
 

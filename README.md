@@ -31,6 +31,7 @@ Works with [duckdb-luajit](https://github.com/alitrack/duckdb-luajit). Formats D
 | `libs/udf/uuid.lua` | udf | UUID v4 generation (math.random, non-crypto) | LuaJIT bit |
 | `libs/udf/html_escape.lua` | udf | HTML entity escape/unescape | none |
 | `libs/mcp/` (mcp-server.sql + sudoku.lua) | mcp | DuckDB as MCP server exposing Lua UDFs to AI (duckdb_mcp + luajit) | duckdb_mcp ext |
+| `libs/mcp/sudoku.lua` | mcp | Sudoku solver (81-char puzzle → solution, anchor-verified) — module-table lib: install then `compile` a wrapper UDF | none |
 
 ## One-SQL Install Protocol (v0.31+ recommended: `install` / `list_remote`)
 

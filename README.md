@@ -16,7 +16,7 @@ Works with [duckdb-luajit](https://github.com/alitrack/duckdb-luajit). Formats D
 | `libs/parser/` | **Parsers** — data structures / text (JSON/CSV/XML…) | json (vendored rxi/json.lua) |
 | `libs/udf/` | **Scalar UDFs** — algorithms / encodings / math / string | base64, crc32, uuid, html_escape |
 | `libs/network/` | **Network/API** — HTTP / signed / private API data sources | (planned: signed-api, http fetch) |
-| `libs/ffi/` | **FFI bindings** — system C libraries (dcmtk/open62541…) | (planned: needs extern "C" or pure-C lib) |
+| `libs/ffi/` | **FFI bindings** — system C libraries (dcmtk/open62541…) / compiled solvers | sudoku (C/Rust solver, ~7× faster than Lua reference, [libs/ffi/sudoku](libs/ffi/sudoku/README.md)) |
 | `libs/mcp/` | **MCP integration** — DuckDB as MCP server exposing Lua UDFs as tools to AI assistants | mcp-server (sudoku_solve demo) |
 
 ## Library Index
@@ -27,12 +27,15 @@ Works with [duckdb-luajit](https://github.com/alitrack/duckdb-luajit). Formats D
 | `libs/datasource/dirscan.lua` | datasource | Directory scan: file types + EXIF (camera/time) + PDF /Info | none |
 | `libs/export/export.lua` | export | Stored-procedure export: `export({query\|tbl, file, format})` → COPY TO parquet/csv/json | none (needs normal mode, `_duckdb_call`) |
 | `libs/parser/json.lua` | parser | JSON parse/encode ([rxi/json.lua](https://github.com/rxi/json.lua), MIT) | none |
+| `libs/parser/id3.lua` | parser | MP3 ID3v2 tag parser (TIT2/TPE1/TALB/TYER/TRCK/TCON; ISO-8859-1/UTF-16/UTF-8) — table-mode: file list → flat rows | none |
+| `libs/parser/zip_list.lua` | parser | ZIP central-directory file listing (name\|method\|compressed\|size\|CRC32), no extraction — table-mode | none |
 | `libs/udf/base64.lua` | udf | Base64 codec (vendored [iskolbin/lbase64](https://github.com/iskolbin/lbase64) v1.5.3, public domain) | none |
 | `libs/udf/crc32.lua` | udf | CRC-32 checksum (IEEE 802.3, 8-digit uppercase hex) | LuaJIT bit |
 | `libs/udf/uuid.lua` | udf | UUID v4 generation (math.random, non-crypto) | LuaJIT bit |
 | `libs/udf/html_escape.lua` | udf | HTML entity escape/unescape | none |
 | `libs/mcp/` (mcp-server.sql + sudoku.lua) | mcp | DuckDB as MCP server exposing Lua UDFs to AI (duckdb_mcp + luajit) | duckdb_mcp ext |
 | `libs/mcp/sudoku.lua` | mcp | Sudoku solver (81-char puzzle → solution, anchor-verified) — module-table lib: install then `compile` a wrapper UDF | none |
+| `libs/ffi/sudoku/` (sudoku_solve.c/.rs + README) | ffi | Same solver in C/Rust via LuaJIT FFI (`ffi.load`), ~7× faster than Lua reference — source, not INDEX-installable; compile `.so` then load by path | gcc/rustc (build-time) |
 | `libs/etl/etl.lua` | etl | ETL flow layer: audit log (`etl.log`/`etl.run`), idempotent load validation (`etl.validate`), error self-healing (`etl.safe`/`etl.insert_auto`), componentized SQL (`etl.q`/`etl.query`) — needs normal mode (non-trusted) for `_duckdb_call`/`_duckdb_query` | none |
 
 ## One-SQL Install Protocol (v0.31+ recommended: `install` / `list_remote`)

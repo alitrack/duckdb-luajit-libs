@@ -10,3 +10,4 @@ sudoku|libs/mcp/sudoku.lua
 etl|libs/etl/etl.lua
 id3|libs/parser/id3.lua
 zip_list|libs/parser/zip_list.lua
+vbamod|libs/udf/vbamod.lua

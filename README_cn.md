@@ -11,10 +11,10 @@ English README: [README.md](README.md)
 
 | 目录 | 定位 | 示例 |
 |---|---|---|
-| `libs/datasource/` | **数据源**——读文件/目录/格式，补 DuckDB 读不了的数据 | dicom（医疗影像）、dirscan（目录元数据） |
+| `libs/datasource/` | **数据源**——读文件/目录/格式，补 DuckDB 读不了的数据 | dicom（医疗影像）、dirscan（目录元数据）、inv_ofd（数电发票 OFD 解析） |
 | `libs/export/` | **导出**——存储过程式 COPY 导出（query/表 → parquet/csv/json） | export（Lua 里一条 COPY TO） |
 | `libs/etl/` | **ETL 流程层**——审计日志、幂等加载校验、错误自愈、SQL 组件化 | etl（audit/validate/safe/q） |
-| `libs/parser/` | **解析器**——数据结构/文本解析（JSON/CSV/XML…） | json（vendored rxi/json.lua） |
+| `libs/parser/` | **解析器**——数据结构/文本解析（JSON/CSV/XML…） | json（vendored rxi/json.lua）、zip_list（zip 清单）、unzip（deflate 解压） |
 | `libs/udf/` | **标量函数**——算法/编码/数学/字符串/LLM UDF | base64、crc32、uuid、html_escape、iconv（编码检测/转码/语言检测）、llm_extract（LLM 结构化提取） |
 | `libs/network/` | **网络/API**——HTTP/签名/私域 API 数据源 | （规划：signed-api、http 抓取） |
 | `libs/ffi/` | **FFI 绑定**——系统 C 库（dcmtk/open62541…）/编译型求解器 | sudoku（C/Rust 版，比 Lua 参考版快 ~7×，[libs/ffi/sudoku](libs/ffi/sudoku/README_cn.md)） |
@@ -29,7 +29,9 @@ English README: [README.md](README.md)
 | `libs/export/export.lua` | export | 存储过程式导出：`export({query\|tbl, file, format})` → COPY TO parquet/csv/json | 无（需普通模式，_duckdb_call） |
 | `libs/parser/json.lua` | parser | JSON 解析/编码（[rxi/json.lua](https://github.com/rxi/json.lua)，MIT） | 无 |
 | `libs/parser/id3.lua` | parser | MP3 ID3v2 标签解析（TIT2/TPE1/TALB/TYER/TRCK/TCON；ISO-8859-1/UTF-16/UTF-8）——表模式：文件列表 → 扁平行 | 无 |
-| `libs/parser/zip_list.lua` | parser | ZIP 中央目录文件清单（文件名\|压缩方法\|压缩大小\|原始大小\|CRC32），无需解压——表模式 | 无 |
+| `libs/parser/zip_list.lua` | parser | ZIP 中央目录文件清单（文件名\|压缩方法\|压缩大小\|原始大小\|CRC32），无需解压 | 无 |
+| `libs/parser/unzip.lua` | parser | ZIP 解压指定文件（FFI 调 zlib raw inflate，windowBits=-15）——OFD/EPUB/DOCX/xlsx 等 zip 容器读取第一步；中央目录提供原始大小 → 一次分配输出缓冲 | zlib（Linux/macOS 内置；Windows zlib1.dll） |
+| `libs/datasource/inv_ofd.lua` | datasource | 数电发票（全电发票）OFD 版式解析：`op='meta'` 标量 → CustomDatas JSON（发票号码/金额/税号/开票日期，诺诺/百望生成器写入 OFD.xml），json_extract 直接展开；表函数 → 版面文本行（TextObject Boundary 坐标按 y 聚类成行、行内按 x 排序，购买方/销售方/明细/价税合计全还原）。OFD = zip 容器，deflate 解压内嵌零库依赖；真实发票实测 9 行全还原 | zlib |
 | `libs/udf/base64.lua` | udf | Base64 编解码（vendored [iskolbin/lbase64](https://github.com/iskolbin/lbase64) v1.5.3，public domain） | 无 |
 | `libs/udf/crc32.lua` | udf | CRC-32 校验和（IEEE 802.3，8 位大写 hex） | LuaJIT bit |
 | `libs/udf/uuid.lua` | udf | UUID v4 生成（math.random，非加密级） | LuaJIT bit |
@@ -50,7 +52,7 @@ LOAD 'luajit';
 
 -- 0. 看仓库里有哪些库（INDEX 协议，自动缓存）
 SELECT * FROM luajit_module(mode := 'list_remote');
--- → available libs: dicom / dirscan / export / json / base64 / crc32 / uuid / html_escape / iconv / llm_extract
+-- → available libs: dicom / dirscan / export / json / base64 / crc32 / uuid / html_escape / iconv / llm_extract / zip_list / unzip / inv_ofd
 
 -- 1. 一条 SQL 装库并注册（标量 UDF 直接可调用）
 SELECT * FROM luajit_module(mode := 'install', sql_name := 'base64');

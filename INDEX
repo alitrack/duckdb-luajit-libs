@@ -12,3 +12,5 @@ id3|libs/parser/id3.lua
 zip_list|libs/parser/zip_list.lua
 iconv|libs/udf/iconv.lua
 llm_extract|libs/udf/llm_extract.lua
+unzip|libs/parser/unzip.lua
+inv_ofd|libs/datasource/inv_ofd.lua

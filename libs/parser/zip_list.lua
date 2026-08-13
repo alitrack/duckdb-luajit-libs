@@ -49,18 +49,18 @@ local function parse(path)
   local pos = cd_offset + 1
   for _ = 1, total do
     if pos + 46 > fsize or d:sub(pos, pos + 3) ~= 'PK\1\2' then break end
-    -- Central dir entry: [4B sig][2B ver_made][2B ver_need][2B flags]
-    --  [2B method][2B time][2B date][4B crc][4B comp][4B uncomp]
-    --  [2B name_len][2B extra_len][2B comment_len][2B disk_start]
-    --  [2B int_attr][4B ext_attr][4B local_offset][name]
-    local method = u16(d, pos + 11)
-    local crc = u32(d, pos + 17)
-    local comp = u32(d, pos + 21)
-    local uncomp = u32(d, pos + 25)
-    local nlen = u16(d, pos + 29)
-    local elen = u16(d, pos + 31)
-    local clen = u16(d, pos + 33)
-    local name = d:sub(pos + 47, pos + 46 + nlen)
+    -- Central dir entry（1-based pos 指 sig 首字节）:
+    --  [4B sig][2B ver_made][2B ver_need][2B flags][2B method][2B time][2B date]
+    --  [4B crc][4B comp][4B uncomp][2B name_len][2B extra_len][2B comment_len]
+    --  [2B disk_start][2B int_attr][4B ext_attr][4B local_offset][name]
+    local method = u16(d, pos + 10)
+    local crc = u32(d, pos + 16)
+    local comp = u32(d, pos + 20)
+    local uncomp = u32(d, pos + 24)
+    local nlen = u16(d, pos + 28)
+    local elen = u16(d, pos + 30)
+    local clen = u16(d, pos + 32)
+    local name = d:sub(pos + 46, pos + 45 + nlen)
     rows[#rows + 1] = table.concat({
       name, METHODS[method] or tostring(method),
       tostring(comp), tostring(uncomp), string.format('%08X', crc),

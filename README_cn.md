@@ -15,7 +15,7 @@ English README: [README.md](README.md)
 | `libs/export/` | **导出**——存储过程式 COPY 导出（query/表 → parquet/csv/json） | export（Lua 里一条 COPY TO） |
 | `libs/etl/` | **ETL 流程层**——审计日志、幂等加载校验、错误自愈、SQL 组件化 | etl（audit/validate/safe/q） |
 | `libs/parser/` | **解析器**——数据结构/文本解析（JSON/CSV/XML…） | json（vendored rxi/json.lua） |
-| `libs/udf/` | **标量函数**——算法/编码/数学/字符串 UDF | base64、crc32、uuid、html_escape |
+| `libs/udf/` | **标量函数**——算法/编码/数学/字符串 UDF | base64、crc32、uuid、html_escape、iconv（编码检测/转码/语言检测） |
 | `libs/network/` | **网络/API**——HTTP/签名/私域 API 数据源 | （规划：signed-api、http 抓取） |
 | `libs/ffi/` | **FFI 绑定**——系统 C 库（dcmtk/open62541…）/编译型求解器 | sudoku（C/Rust 版，比 Lua 参考版快 ~7×，[libs/ffi/sudoku](libs/ffi/sudoku/README_cn.md)） |
 | `libs/mcp/` | **MCP 集成**——DuckDB 作为 MCP server，把 Lua UDF 发布成 tools 给 AI 助手调用 | mcp-server（sudoku_solve 示例） |
@@ -34,6 +34,7 @@ English README: [README.md](README.md)
 | `libs/udf/crc32.lua` | udf | CRC-32 校验和（IEEE 802.3，8 位大写 hex） | LuaJIT bit |
 | `libs/udf/uuid.lua` | udf | UUID v4 生成（math.random，非加密级） | LuaJIT bit |
 | `libs/udf/html_escape.lua` | udf | HTML 实体转义/反转义 | 无 |
+| `libs/udf/iconv.lua` | udf | 字符编码全家桶：`enc_detect`（BOM→UTF-8 严格校验→GB18030/GBK 特征）、`convert`（FFI 调 libc iconv，//IGNORE 语义剔除半个字/孤立字节，E2BIG 不静默截断）、`file`（GBK 等任意编码文件 → UTF-8 临时文件，喂 `read_csv`/`COPY`）、`lang`（ISO 639-1 语言检测：字符区间 15 语言 + 拉丁停用词细分）——read_csv 的 encoding 只支持 utf-8/utf-16/latin-1，中文编码是真空位 | 无（FFI libc iconv；Windows 需 libiconv.dll） |
 | `libs/mcp/` (mcp-server.sql + sudoku.lua) | mcp | DuckDB 作为 MCP server 暴露 Lua UDF 给 AI（duckdb_mcp + luajit 合体） | duckdb_mcp 扩展 |
 | `libs/mcp/sudoku.lua` | mcp | 数独求解器（81 位题面 → 解，锚点验证）——模块表库：install 后 compile 包装成 UDF | 无 |
 | `libs/ffi/sudoku/` (sudoku_solve.c/.rs + README) | ffi | 同求解器的 C/Rust 版，LuaJIT FFI（`ffi.load`）调用，比 Lua 参考版快 ~7×——源码非 INDEX 可装库；编译 .so 后按路径加载 | gcc/rustc（构建时） |
@@ -48,7 +49,7 @@ LOAD 'luajit';
 
 -- 0. 看仓库里有哪些库（INDEX 协议，自动缓存）
 SELECT * FROM luajit_module(mode := 'list_remote');
--- → available libs: dicom / dirscan / export / json / base64 / crc32 / uuid / html_escape
+-- → available libs: dicom / dirscan / export / json / base64 / crc32 / uuid / html_escape / iconv
 
 -- 1. 一条 SQL 装库并注册（标量 UDF 直接可调用）
 SELECT * FROM luajit_module(mode := 'install', sql_name := 'base64');

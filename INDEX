@@ -14,3 +14,5 @@ iconv|libs/udf/iconv.lua
 llm_extract|libs/udf/llm_extract.lua
 unzip|libs/parser/unzip.lua
 inv_ofd|libs/datasource/inv_ofd.lua
+incremental|libs/etl/incremental.lua
+scd2|libs/etl/scd2.lua

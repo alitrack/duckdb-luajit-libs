@@ -3,7 +3,8 @@
 -- @desc: 字符编码全家桶——enc_detect(编码检测) / convert(iconv 转码, //IGNORE 剔非法字节) /
 --        file(文件转码→UTF-8 临时文件，供 read_csv/COPY 直接消费) / lang(语言检测 ISO 639-1)
 -- @source: original（duckdb-luajit 系列）
--- @requires: none（FFI 调 libc 的 iconv：Linux glibc/macOS 自带；Windows 需 libiconv.dll）
+-- @requires: none（FFI 调 libc 的 iconv：Linux glibc/macOS 内置；Windows 需 GNU libiconv 的
+--   libiconv-2.dll——放 PATH 或设 LUAJIT_ICONV_LIB 指向完整路径）
 -- ⚠️ 需普通模式（非 trusted）：file 场景用 io.open 读文件
 --
 -- Usage (duckdb-luajit):
@@ -35,14 +36,25 @@ ffi.cdef[[
   int iconv_close(iconv_t cd);
 ]]
 
--- glibc 的 iconv 在 libc 里；macOS/其他平台可能叫 iconv
+-- glibc 的 iconv 在 libc 里（Linux 直调 'c'）；macOS 在 libiconv（Apple 内置）；
+-- Windows 无系统 iconv，需 GNU libiconv 的 DLL（msys2 包名 libiconv-2.dll）。
+-- 搜索链：'c' → 'iconv' → 'libiconv' → 'libiconv-2'（ffi.load 在 Windows 按 name.dll/libname.dll 规则补全）。
+-- 若 DLL 在非 PATH 位置，可用环境变量 LUAJIT_ICONV_LIB 指定完整路径（普通模式 os.getenv 可用）。
 local C
-for _, lib in ipairs({ 'c', 'iconv' }) do
-  local ok, l = pcall(ffi.load, lib)
-  if ok and l.iconv_open then C = l; break end
+local custom = os and os.getenv and os.getenv('LUAJIT_ICONV_LIB')
+if custom then
+  local ok, l = pcall(ffi.load, custom)
+  if ok and l.iconv_open then C = l end
 end
 if not C then
-  error('iconv: cannot load libc iconv (Linux/macOS built-in; Windows needs libiconv.dll)')
+  for _, lib in ipairs({ 'c', 'iconv', 'libiconv', 'libiconv-2' }) do
+    local ok, l = pcall(ffi.load, lib)
+    if ok and l.iconv_open then C = l break end
+  end
+end
+if not C then
+  error('iconv: cannot load iconv — Linux/macOS built-in; Windows needs GNU libiconv '
+    .. '(install libiconv-2.dll into PATH or set LUAJIT_ICONV_LIB to its full path)')
 end
 
 local NEG1 = ffi.cast('size_t', -1)

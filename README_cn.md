@@ -45,6 +45,28 @@ English README: [README.md](README.md)
 | `libs/etl/incremental.lua` | incremental | 增量加载：水位游标（`etl_watermark` 表），`ts`/`id`/`ts_id` 三种游标模式，只加载新行，返回 JSON（`loaded`/`last_ts`/`last_id`）——需普通模式 | 无 |
 | `libs/etl/scd2.lua` | scd2 | 缓慢变化维度类型 2：属性指纹（md5）对比，自动建表（`_valid_from`/`_valid_to`/`_is_current`/`_version`），关闭旧版本 + 插入新版本，幂等——需普通模式 | 无 |
 
+### 增量加载 × DuckLake 数据湖（实测组合）
+
+增量加载天然配数据湖：**incremental 管水位**（读哪些新行），**DuckLake 管存储/快照/CDC**（写哪、时间旅行、变更流）。`incremental.run` 的目标表直接指 DuckLake 表，**零代码修改**——实测（DuckDB v1.5.5 + ducklake 扩展 + incremental 8171577）：
+
+```sql
+LOAD ducklake;
+ATTACH 'ducklake:meta.ducklake' AS dl (DATA_PATH 'data/');
+CREATE TABLE dl.orders(id BIGINT, ts TIMESTAMP, amount DOUBLE);
+
+SELECT incr_run({'op':'run', 'target':'dl.orders', 'source':'src_orders', 'ts_col':'ts', 'mode':'ts'});
+-- → {"loaded":3,...} 首次全量；再跑只增量 → {"loaded":2,...}
+
+-- 白赚三件套：
+-- 1. 时间旅行
+FROM dl.orders AT (VERSION => 2);   -- 首载快照 3 行
+-- 2. 变更数据流（CDC，供下游消费）
+FROM dl.table_changes('orders', 1, 2);  -- snapshot_id / rowid / change_type / 行
+-- 3. 数据落 parquet（可被 Spark/Polars 读）；小变更自动 Data Inlining 进 metadata 库，不写小文件
+```
+
+分工哲学不变：Lua 只做它擅长的（游标/水位 SQL 逻辑），存储引擎交给 DuckLake。
+
 ## 一条 SQL 安装协议（v0.31+ 推荐：`install` / `list_remote`）
 
 duckdb-luajit **v0.31 起内置包管理**——`luajit_module` 新增 `install` / `list_remote` 模式，从本仓库按 INDEX 拉库、缓存到 `~/.duckdb/luajit-libs/`、自动注册，免手写拉取 SQL：
@@ -54,7 +76,7 @@ LOAD 'luajit';
 
 -- 0. 看仓库里有哪些库（INDEX 协议，自动缓存）
 SELECT * FROM luajit_module(mode := 'list_remote');
--- → available libs: dicom / dirscan / export / json / base64 / crc32 / uuid / html_escape / iconv / llm_extract / zip_list / unzip / inv_ofd
+-- → available libs: dicom / dirscan / export / json / base64 / crc32 / uuid / html_escape / iconv / llm_extract / zip_list / unzip / inv_ofd / incremental / scd2
 
 -- 1. 一条 SQL 装库并注册（标量 UDF 直接可调用）
 SELECT * FROM luajit_module(mode := 'install', sql_name := 'base64');

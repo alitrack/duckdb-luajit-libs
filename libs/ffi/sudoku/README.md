@@ -16,6 +16,9 @@ load a compiled `.so` via `ffi.load` and call it directly from a Lua UDF.
 | `sudoku_solve.rs` | Rust (cdylib) | `int sudoku_solve(const char *p, char *out)` | `rustc --edition 2021 -O --crate-type cdylib -o libsudoku_rs.so sudoku_solve.rs` |
 | `demo_tcc_embed.lua` | LuaJIT + libtcc | — | runtime compile, no gcc needed (see below) |
 | `demo_tcc_in_duckdb.sql` | SQL + libtcc | — | runtime compile inside the extension (see below) |
+| `demo_tcc_inline.lua` | LuaJIT + libtcc | — | **C source inlined** in the Lua string, self-contained |
+| `demo_tcc_inline_in_duckdb.sql` | SQL + libtcc | — | **C source inlined**, self-contained, install-able |
+| `gen_inline.lua` | generator | — | regenerates the two inline demos from `sudoku_solve.c` |
 
 Both take an 81-char puzzle (`0` = empty) and write the 81-char solution into a
 caller-provided buffer (≥ 82 bytes, NUL-terminated). Return `1` on success, `0` otherwise.
@@ -64,6 +67,19 @@ duckdb -unsigned < <repo>/libs/ffi/sudoku/demo_tcc_in_duckdb.sql
 The mechanism: `ffi.load("libtcc.so")` → `tcc_compile_string` → `tcc_relocate` →
 `tcc_get_symbol` → cast the symbol to a C function pointer and call it. See
 `demo_tcc_embed.lua` for the complete annotated recipe.
+
+**Fully inline variant (C source embedded in the string)**: the two
+`demo_tcc_inline*` files embed the whole C source directly in the Lua/SQL
+string — no `.c` file read at runtime, no `.so`, fully self-contained, and the
+extension variant can even go through the `install` protocol:
+
+```bash
+# Regenerate both inline demos from sudoku_solve.c (single source of truth):
+./luajit <repo>/libs/ffi/sudoku/gen_inline.lua
+# Verify:
+./luajit <repo>/libs/ffi/sudoku/demo_tcc_inline.lua
+duckdb -unsigned < <repo>/libs/ffi/sudoku/demo_tcc_inline_in_duckdb.sql
+```
 
 Caveats:
 - **Performance**: TCC-generated code is ~5× slower than gcc -O3, and roughly

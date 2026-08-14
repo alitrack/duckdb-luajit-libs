@@ -15,6 +15,9 @@
 | `sudoku_solve.rs` | Rust (cdylib) | 同上 | `rustc --edition 2021 -O --crate-type cdylib -o libsudoku_rs.so sudoku_solve.rs` |
 | `demo_tcc_embed.lua` | LuaJIT + libtcc | — | 运行时编译,不需要 gcc(见下文) |
 | `demo_tcc_in_duckdb.sql` | SQL + libtcc | — | 扩展内运行时编译(见下文) |
+| `demo_tcc_inline.lua` | LuaJIT + libtcc | — | **C 源码直接内嵌**在 Lua 字符串,自包含 |
+| `demo_tcc_inline_in_duckdb.sql` | SQL + libtcc | — | **C 源码直接内嵌**,自包含、可 install |
+| `gen_inline.lua` | 生成器 | — | 从 `sudoku_solve.c` 重新生成两个 inline demo |
 
 两者都接收 81 位题目串（`0`=空），把 81 位解写入调用方提供的缓冲区
 （≥82 字节，NUL 结尾）。成功返回 `1`，无解/非法输入返回 `0`。
@@ -62,6 +65,18 @@ duckdb -unsigned < <repo>/libs/ffi/sudoku/demo_tcc_in_duckdb.sql
 机制:`ffi.load("libtcc.so")` → `tcc_compile_string` → `tcc_relocate` →
 `tcc_get_symbol` → 把符号 cast 成 C 函数指针直接调用。完整带注释的示例见
 `demo_tcc_embed.lua`。
+
+**完全内嵌变体(C 源码直接嵌在字符串里)**:两个 `demo_tcc_inline*` 文件把整个
+C 源码直接内嵌进 Lua/SQL 字符串——运行时**不读 .c 文件、不产 .so**,完全自包含,
+扩展内嵌版甚至能走 `install` 协议:
+
+```bash
+# 从 sudoku_solve.c 重新生成两个 inline demo(单一事实来源):
+./luajit <repo>/libs/ffi/sudoku/gen_inline.lua
+# 验证:
+./luajit <repo>/libs/ffi/sudoku/demo_tcc_inline.lua
+duckdb -unsigned < <repo>/libs/ffi/sudoku/demo_tcc_inline_in_duckdb.sql
+```
 
 注意事项:
 - **性能**:TCC 生成的代码比 gcc -O3 慢约 5 倍,且**与纯 Lua v2 基本持平**

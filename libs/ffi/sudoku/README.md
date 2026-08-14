@@ -19,6 +19,7 @@ load a compiled `.so` via `ffi.load` and call it directly from a Lua UDF.
 | `demo_tcc_inline.lua` | LuaJIT + libtcc | — | **C source inlined** in the Lua string, self-contained |
 | `demo_tcc_inline_in_duckdb.sql` | SQL + libtcc | — | **C source inlined**, self-contained, install-able |
 | `gen_inline.lua` | generator | — | regenerates the two inline demos from `sudoku_solve.c` |
+| `bench_four.lua` | benchmark | — | 5-way same-puzzle benchmark (Lua/gcc/tcc-so/TCC-mem/Rust) |
 
 Both take an 81-char puzzle (`0` = empty) and write the 81-char solution into a
 caller-provided buffer (≥ 82 bytes, NUL-terminated). Return `1` on success, `0` otherwise.
@@ -108,6 +109,30 @@ Caveats:
   puzzle and solve 100/100 sudoku17 puzzles (verified by row/col/box rules).
 - Lua v2 stays the default library: zero compile deps, cross-platform,
   `install`-able. These C/Rust builds are the FFI demonstration layer.
+
+## Benchmark (2026-08-14, same-puzzle loop, unified methodology)
+
+Same anchor puzzle, 5000 iterations per variant, 200-iteration warm-up, single
+process, one script (`bench_four.lua`):
+
+| Variant | ms/puzzle | vs Lua v2 |
+|---|---|---|
+| 1. Pure Lua v2 (`libs/mcp/sudoku.lua`) | 0.976 | 1.00× |
+| 2. gcc -O3 prebuilt `.so` | 0.166 | **5.9×** |
+| 3. tcc -shared `.so` | 0.905 | 1.08× |
+| 4. TCC in-memory compile (inline) | 0.893 | 1.09× |
+| 5. Rust cdylib | 0.190 | 5.1× |
+
+Readings:
+- gcc -O3 and Rust are the fast tier (~5–6× over Lua v2).
+- TCC-generated code (both `.so` and in-memory) is at parity with pure Lua —
+  **the TCC route is a capability demo (runtime C compilation), not a speed win**.
+- No gcc toolchain? The pragmatic default is pure Lua v2: zero deps, just as
+  fast as TCC-compiled C, and `install`-able.
+
+The earlier sudoku17-mixed-dataset table below uses a different workload
+(harder average puzzle difficulty), so its absolute ms/puzzle numbers differ;
+relative ordering is the same.
 
 ## Notes
 

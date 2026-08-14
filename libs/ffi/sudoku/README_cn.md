@@ -18,6 +18,7 @@
 | `demo_tcc_inline.lua` | LuaJIT + libtcc | — | **C 源码直接内嵌**在 Lua 字符串,自包含 |
 | `demo_tcc_inline_in_duckdb.sql` | SQL + libtcc | — | **C 源码直接内嵌**,自包含、可 install |
 | `gen_inline.lua` | 生成器 | — | 从 `sudoku_solve.c` 重新生成两个 inline demo |
+| `bench_four.lua` | 基准 | — | 五方式同题基准(Lua/gcc/tcc-so/TCC内存/Rust) |
 
 两者都接收 81 位题目串（`0`=空），把 81 位解写入调用方提供的缓冲区
 （≥82 字节，NUL 结尾）。成功返回 `1`，无解/非法输入返回 `0`。
@@ -100,6 +101,27 @@ duckdb -unsigned < <repo>/libs/ffi/sudoku/demo_tcc_inline_in_duckdb.sql
 - C/Rust 比 Lua v2 快约 **7 倍**；C 与 Rust 基本持平。
 - 正确性：三实现锚点输出一致，sudoku17 100/100 全解（行列块规则验证）。
 - 默认库仍是 Lua v2：零编译依赖、跨平台、可 `install`。C/Rust 版是 FFI 演示层。
+
+## 基准（2026-08-14 同题循环，统一口径）
+
+同一锚点题、每方式循环 5000 次、预热 200 次、单进程、单脚本（`bench_four.lua`）：
+
+| 方式 | ms/题 | vs Lua v2 |
+|---|---|---|
+| 1. 纯 Lua v2（`libs/mcp/sudoku.lua`） | 0.976 | 1.00× |
+| 2. gcc -O3 预编译 `.so` | 0.166 | **5.9×** |
+| 3. tcc -shared 编译 `.so` | 0.905 | 1.08× |
+| 4. TCC 内存编译（inline） | 0.893 | 1.09× |
+| 5. Rust cdylib | 0.190 | 5.1× |
+
+结论：
+- gcc -O3 与 Rust 是第一梯队（约为纯 Lua 的 5–6 倍）。
+- TCC 生成的代码（.so 和内存编译都一样）与纯 Lua 基本持平——**TCC 路线是能力演示
+  （运行时编译 C），不是性能优势**。
+- 没有 gcc 工具链时,务实默认就是纯 Lua v2：零依赖、和 TCC 编译的 C 一样快、可 install。
+
+下表是更早的 sudoku17 混合题集基准，题集难度不同，绝对 ms/题 数值不可直接比，
+但相对排序一致。
 
 ## 备注
 

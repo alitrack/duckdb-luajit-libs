@@ -14,6 +14,8 @@ load a compiled `.so` via `ffi.load` and call it directly from a Lua UDF.
 |---|---|---|---|
 | `sudoku_solve.c` | C | `int sudoku_solve(const char *p, char *out)` | `gcc -O3 -shared -fPIC -o libsudoku_c.so sudoku_solve.c` |
 | `sudoku_solve.rs` | Rust (cdylib) | `int sudoku_solve(const char *p, char *out)` | `rustc --edition 2021 -O --crate-type cdylib -o libsudoku_rs.so sudoku_solve.rs` |
+| `demo_tcc_embed.lua` | LuaJIT + libtcc | — | runtime compile, no gcc needed (see below) |
+| `demo_tcc_in_duckdb.sql` | SQL + libtcc | — | runtime compile inside the extension (see below) |
 
 Both take an 81-char puzzle (`0` = empty) and write the 81-char solution into a
 caller-provided buffer (≥ 82 bytes, NUL-terminated). Return `1` on success, `0` otherwise.
@@ -41,6 +43,41 @@ SELECT luajit_s('sudoku_c', '000001002000020030004500600007600050080090006100005
 ```
 
 Swap `libsudoku_c.so` → `libsudoku_rs.so` for the Rust build — the FFI cdef is identical.
+
+## No gcc? No problem — build with TCC at runtime
+
+The gcc route above requires a C toolchain. If the target machine has **no gcc**
+(but has a `libtcc`, e.g. `sudo apt install tcc` or a local build under
+`~/.local/tcc`), you can compile `sudoku_solve.c` **at runtime, in memory**,
+with zero pre-built artifacts — no `.so` on disk at all:
+
+```bash
+# Quick check (LuaJIT only, no DuckDB needed):
+cd <LuaJIT>/third_party/LuaJIT/src
+./luajit <repo>/libs/ffi/sudoku/demo_tcc_embed.lua
+# → compile+relocate: OK / solve MATCH ✓ / ~0.9 ms/puzzle
+
+# Full DuckDB E2E (compiles inside luajit_module, registers a UDF):
+duckdb -unsigned < <repo>/libs/ffi/sudoku/demo_tcc_in_duckdb.sql
+```
+
+The mechanism: `ffi.load("libtcc.so")` → `tcc_compile_string` → `tcc_relocate` →
+`tcc_get_symbol` → cast the symbol to a C function pointer and call it. See
+`demo_tcc_embed.lua` for the complete annotated recipe.
+
+Caveats:
+- **Performance**: TCC-generated code is ~5× slower than gcc -O3, and roughly
+  *at parity with the pure-Lua v2 solver* (same-puzzle loop, 2026-08-14:
+  Lua v2 0.98 ms / tcc .so 0.90 ms / gcc .so 0.16 ms). So if you lack gcc,
+  the pure-Lua `libs/mcp/sudoku.lua` is the pragmatic default — no toolchain,
+  `install`-able, just as fast. The TCC route's value is the FFI demo itself
+  (runtime C compilation), not speed.
+- `ffi.cdef` cannot contain `#define`; pass numeric constants directly
+  (`TCC_OUTPUT_MEMORY = 1`, `TCC_RELOCATE_AUTO = (void*)1` → `ffi.cast("void*", 1)`).
+- libtcc 0.9.27 does not search system include dirs on its own: pass
+  `-I<prefix>/lib/tcc/include` via `tcc_set_options`, and point
+  `tcc_set_lib_path` at `<prefix>/lib`.
+- Hoist the whole compile into the module body once; do not recompile per call.
 
 ## Benchmark (2026-08-08, sudoku17 dataset, same 100-puzzle set, single-process)
 

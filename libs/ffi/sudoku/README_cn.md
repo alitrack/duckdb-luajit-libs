@@ -13,6 +13,8 @@
 |---|---|---|---|
 | `sudoku_solve.c` | C | `int sudoku_solve(const char *p, char *out)` | `gcc -O3 -shared -fPIC -o libsudoku_c.so sudoku_solve.c` |
 | `sudoku_solve.rs` | Rust (cdylib) | 同上 | `rustc --edition 2021 -O --crate-type cdylib -o libsudoku_rs.so sudoku_solve.rs` |
+| `demo_tcc_embed.lua` | LuaJIT + libtcc | — | 运行时编译,不需要 gcc(见下文) |
+| `demo_tcc_in_duckdb.sql` | SQL + libtcc | — | 扩展内运行时编译(见下文) |
 
 两者都接收 81 位题目串（`0`=空），把 81 位解写入调用方提供的缓冲区
 （≥82 字节，NUL 结尾）。成功返回 `1`，无解/非法输入返回 `0`。
@@ -40,6 +42,37 @@ SELECT luajit_s('sudoku_c', '000001002000020030004500600007600050080090006100005
 ```
 
 Rust 版把 `libsudoku_c.so` 换成 `libsudoku_rs.so` 即可——FFI cdef 完全一样。
+
+## 没有 gcc?用 TCC 运行时编译,零预编译产物
+
+上面 gcc 路线要求本机有 C 工具链。如果目标机器**没有 gcc**、但装了 libtcc
+(`sudo apt install tcc`,或源码装到 `~/.local/tcc`),可以**在运行时把
+`sudoku_solve.c` 编译进内存**——磁盘上不需要任何 `.so`:
+
+```bash
+# 快速验证(只用 LuaJIT,不需要 DuckDB):
+cd <LuaJIT>/third_party/LuaJIT/src
+./luajit <repo>/libs/ffi/sudoku/demo_tcc_embed.lua
+# → compile+relocate: OK / solve MATCH ✓ / 约 0.9 ms/题
+
+# DuckDB 全链路(在 luajit_module 内部编译并注册 UDF):
+duckdb -unsigned < <repo>/libs/ffi/sudoku/demo_tcc_in_duckdb.sql
+```
+
+机制:`ffi.load("libtcc.so")` → `tcc_compile_string` → `tcc_relocate` →
+`tcc_get_symbol` → 把符号 cast 成 C 函数指针直接调用。完整带注释的示例见
+`demo_tcc_embed.lua`。
+
+注意事项:
+- **性能**:TCC 生成的代码比 gcc -O3 慢约 5 倍,且**与纯 Lua v2 基本持平**
+  (2026-08-14 同题循环实测:Lua v2 0.98 ms / tcc .so 0.90 ms / gcc .so 0.16 ms)。
+  所以没有 gcc 时,**纯 Lua `libs/mcp/sudoku.lua` 才是务实默认**——零工具链、
+  可 `install`、速度一样。TCC 路线的价值是 FFI 演示本身(运行时编译 C),不是速度。
+- `ffi.cdef` 里不能写 `#define`,常量直接写数字
+  (`TCC_OUTPUT_MEMORY = 1`;relocate 传 `ffi.cast("void*", 1)`)。
+- libtcc 0.9.27 不会自动搜系统 include 目录:必须经 `tcc_set_options` 传
+  `-I<前缀>/lib/tcc/include`,`tcc_set_lib_path` 指 `<前缀>/lib`。
+- 整个编译放模块 body 只做一次,函数指针缓存,不要每次调用都编译。
 
 ## 基准（2026-08-08 实测，sudoku17 数据集，同 100 题集，单进程）
 

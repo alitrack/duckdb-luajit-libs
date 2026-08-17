@@ -16,3 +16,4 @@ unzip|libs/parser/unzip.lua
 inv_ofd|libs/datasource/inv_ofd.lua
 incremental|libs/etl/incremental.lua
 scd2|libs/etl/scd2.lua
+highs|libs/optimize/highs.lua

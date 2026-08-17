@@ -113,7 +113,7 @@ ffi.cdef[[
                         HighsInt* model_status);
 ]]
 
--- 加载链：环境变量 → 'highs' → 'libhighs'（Windows 自动补 .dll）
+-- 加载链：LUAJIT_HIGHS_LIB 环境变量 → 系统搜索路径 → 常见用户路径
 local lib
 local custom = os and os.getenv and os.getenv('LUAJIT_HIGHS_LIB')
 if custom then
@@ -123,6 +123,18 @@ end
 if not lib then
   for _, name in ipairs({ 'highs', 'libhighs' }) do
     local ok, l = pcall(ffi.load, name)
+    if ok and l.Highs_lpCall then lib = l break end
+  end
+end
+if not lib and os and os.getenv then
+  -- 无 root 安装场景（~/.local/lib、/usr/local/lib、/opt）
+  local home = os.getenv('HOME') or ''
+  for _, p in ipairs({
+    home .. '/.local/lib/libhighs.so',
+    '/usr/local/lib/libhighs.so',
+    '/opt/homebrew/lib/libhighs.so',
+  }) do
+    local ok, l = pcall(ffi.load, p)
     if ok and l.Highs_lpCall then lib = l break end
   end
 end

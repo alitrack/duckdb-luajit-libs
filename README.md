@@ -17,6 +17,7 @@ Works with [duckdb-luajit](https://github.com/alitrack/duckdb-luajit). Formats D
 | `libs/udf/` | **Scalar UDFs** — algorithms / encodings / math / string | base64, crc32, uuid, html_escape |
 | `libs/network/` | **Network/API** — HTTP / signed / private API data sources | (planned: signed-api, http fetch) |
 | `libs/optimize/` | **Optimization** — LP/QP/MILP solvers (HiGHS via FFI) | highs (diet problem demo) |
+| `libs/linalg/` | **Linear algebra** — matmul/SVD/eigh/inv/LU/chol/QR (LAPACK/OpenBLAS via FFI) | linalg |
 | `libs/ffi/` | **FFI bindings** — system C libraries (dcmtk/open62541…) / compiled solvers | sudoku (C/Rust solver, ~7× faster than Lua reference, [libs/ffi/sudoku](libs/ffi/sudoku/README.md)) |
 | `libs/mcp/` | **MCP integration** — DuckDB as MCP server exposing Lua UDFs as tools to AI assistants | mcp-server (sudoku_solve demo) |
 
@@ -37,6 +38,7 @@ Works with [duckdb-luajit](https://github.com/alitrack/duckdb-luajit). Formats D
 | `libs/mcp/` (mcp-server.sql + sudoku.lua) | mcp | DuckDB as MCP server exposing Lua UDFs to AI (duckdb_mcp + luajit) | duckdb_mcp ext |
 | `libs/mcp/sudoku.lua` | mcp | Sudoku solver (81-char puzzle → solution, anchor-verified) — module-table lib: install then `compile` a wrapper UDF | none |
 | `libs/optimize/highs.lua` | optimize | LP/QP/MILP solver via LuaJIT FFI → [HiGHS](https://github.com/ERGO-Code/HiGHS) (MIT, default LP/MIP solver in SciPy/MATLAB) — `{'op':'lp'\|'mip'\|'qp', ...}` → JSON result; diet/transport/QP anchor-verified vs CLI & hand-solved | libhighs.so (build-time, `LUAJIT_HIGHS_LIB` to override) |
+| `libs/linalg/linalg.lua` | linalg | Linear algebra via LuaJIT FFI → system LAPACK/OpenBLAS (40-yr industry standard, same kernels as MATLAB/R/numpy) — `matmul`/`svd`/`eigh`/`inv`/`lu`/`chol`/`qr`/`norm`, flat row-major `DOUBLE[]`+m/n in → flat out; 10 anchored cases incl. 3×2 SVD (U·Σ·Vᵀ=A) | libopenblas.so (system, `LUALINALG_LIB` to override) |
 | `libs/ffi/sudoku/` (sudoku_solve.c/.rs + README) | ffi | Same solver in C/Rust via LuaJIT FFI (`ffi.load`), ~7× faster than Lua reference — source, not INDEX-installable; compile `.so` then load by path | gcc/rustc (build-time) |
 | `libs/etl/etl.lua` | etl | ETL flow layer: audit log (`etl.log`/`etl.run`), idempotent load validation (`etl.validate`), error self-healing (`etl.safe`/`etl.insert_auto`), componentized SQL (`etl.q`/`etl.query`) — needs normal mode (non-trusted) for `_duckdb_call`/`_duckdb_query` | none |
 

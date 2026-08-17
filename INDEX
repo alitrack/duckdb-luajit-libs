@@ -17,3 +17,4 @@ inv_ofd|libs/datasource/inv_ofd.lua
 incremental|libs/etl/incremental.lua
 scd2|libs/etl/scd2.lua
 highs|libs/optimize/highs.lua
+linalg|libs/linalg/linalg.lua

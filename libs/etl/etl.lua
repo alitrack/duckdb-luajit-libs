@@ -1,4 +1,4 @@
--- etl.lua: ETL 流程层——审计 / 幂等 / 自愈 / 组件化 / Pipeline 引擎（2026-08-07）
+-- etl.lua: ETL 流程层——审计 / 幂等 / 自愈 / 组件化 / Pipeline 引擎（2026-08-19）
 -- 需要普通模式（非 trusted）：存储过程回查依赖 _duckdb_call / _duckdb_query
 --
 -- 使用（install 后）：
@@ -14,6 +14,12 @@
 --   P3 etl.pipeline / compile   —— Pipeline 引擎：Pipeline JSON → 拓扑排序 → 编译 → 执行 + 逐节点审计
 --                                 节点类型: source(建临时表) / transform(SQL) / transform_lua(Lua闭包行处理)
 --                                           quality(数据质量检查) / sink(落表)
+--                                           if_node(条件路由) / switch_node(多路路由)
+--                                 路由: 下游节点 route="true"/"false" 匹配 if_node 条件 → 不匹配的支路跳过
+--                                        switch_node 的 selector 返回 string → 下游 route 匹配才执行
+--                                 重试: 节点配置 retry={max=3, backoff=1.0} → 指数退避 backoff×2^(n-1)
+--                                 超时: 节点配置 timeout=60 → 超时后中止（含重试总时间）
+--                                 错误恢复: 节点配置 on_error="handler_id" → 失败时不中止，运行 handler 后继续
 --                                 数据质量检查: not_null / unique / rowcount_min / rowcount_max / schema
 
 local etl = {}
@@ -27,6 +33,12 @@ local function esc(v)
   end
   if v == nil then return "NULL" end
   return tostring(v)
+end
+
+-- 繁忙等待（秒，LuaJIT 内无可移植 sleep，用 busy-loop 替代）
+local function busy_sleep(sec)
+  local t0 = os.clock()
+  while os.clock() - t0 < sec do end
 end
 
 -- ============ P0: 审计 ============
@@ -201,7 +213,18 @@ end
 --         { type = "unique",   col = "id" },
 --         { type = "rowcount_min", min = 1 },
 --       }, deps = { "clean" } },
---     { id = "out",   type = "sink",         table = "orders_clean", deps = { "clean" } },
+--     { id = "has_data", type = "if_node",   deps = {"audit"},
+--       condition = function(ctx) return ctx.audit > 0 end },
+--     { id = "process", type = "transform",  deps = {"has_data"}, route = "true",
+--       query = "SELECT * FROM clean WHERE amount > 100" },
+--     { id = "log_empty", type = "sink",     deps = {"has_data"}, route = "false",
+--       table = "empty_log" },
+--     { id = "out",   type = "sink",         table = "orders_clean", deps = { "process" },
+--       retry = { max = 2, backoff = 1.0 }, timeout = 120 },
+--     { id = "risky", type = "transform",    deps = {"src"},
+--       query = "SELECT 1/0", on_error = "fallback" },
+--     { id = "fallback", type = "transform", deps = {"src"},
+--       query = "SELECT 0 AS result" },
 --   },
 -- }
 -- 执行语义：source → CREATE OR REPLACE TEMP TABLE <id> AS <query>
@@ -209,7 +232,13 @@ end
 --           transform_lua → 读上游表行 → Lua 闭包逐行处理 → 写回临时表
 --           quality → 对上游表跑 checks，任一失败抛错
 --           sink → CREATE OR REPLACE TABLE <table> AS SELECT * FROM <上游>
--- 每节点执行记一条审计（etl_run_log），失败即中止。
+--           if_node → 评估 condition(ctx)，路由到 "true" 或 "false" 分支
+--           switch_node → 评估 selector(ctx)，路由到对应 case 分支
+--           路由：下游节点 route="X" 匹配 if_node/switch_node 结果才执行，不匹配跳过（不报错）
+--           重试：retry.max 次重试，退避 retry.backoff × 2^(n-1) 秒
+--           超时：timeout 秒内必须完成（含重试总时间），超时走失败逻辑
+--           错误恢复：on_error 设 handler_id，失败时不中止，handler 在拓扑中正常执行
+-- 每节点执行记一条审计（etl_run_log），失败即中止（除非设 on_error）。
 
 -- 内部：执行一个 quality 检查，失败抛错
 local function run_check(tbl, check)
@@ -290,29 +319,17 @@ function etl.compile(p)
   local order = topo_sort(p.nodes)
   local by_id = {}
   for _, n in ipairs(p.nodes) do by_id[n.id] = n end
-  local compiled = { name = p.name or "unnamed", order = order, nodes = by_id }
-  return compiled
-end
-
--- 执行 Pipeline（先 compile 再逐节点执行）
--- 返回 { node_results = { id = rows, ... } }
-function etl.pipeline(p)
-  local c = etl.compile(p)
-  local results = {}
-  for _, id in ipairs(c.order) do
-    local n = c.nodes[id]
-    local t0 = os.clock()
-    local ok, res = pcall(function() return etl.run_node(n, results) end)
-    local dt = math.floor((os.clock() - t0) * 1000)
-    if ok then
-      etl.log(0, "node:" .. n.id, "{\"type\":\"" .. tostring(n.type) .. "\"}", dt, res or 0, true, nil)
-      results[n.id] = res
-    else
-      etl.log(0, "node:" .. n.id, "{\"type\":\"" .. tostring(n.type) .. "\"}", dt, 0, false, tostring(res))
-      error("pipeline[" .. tostring(c.name) .. "] node '" .. n.id .. "' failed: " .. tostring(res), 0)
+  -- 校验：route 节点必须有 deps
+  for _, n in ipairs(p.nodes) do
+    if n.route and (not n.deps or #n.deps == 0) then
+      error("pipeline: node '" .. n.id .. "' has route but no deps", 0)
+    end
+    if n.on_error and not by_id[n.on_error] then
+      error("pipeline: node '" .. n.id .. "' on_error target '" .. n.on_error .. "' not found", 0)
     end
   end
-  return results
+  local compiled = { name = p.name or "unnamed", order = order, nodes = by_id }
+  return compiled
 end
 
 -- 执行单个节点（pipeline 内部使用）
@@ -372,9 +389,99 @@ function etl.run_node(n, results)
     local rows, err = _duckdb_query("SELECT CAST(count(*) AS BIGINT) AS n FROM " .. tbl)
     if not rows then error(tostring(err), 0) end
     return tonumber(rows[1].n) or 0
+  elseif typ == "if_node" then
+    -- 评估条件：condition(results) → boolean
+    local cond = n.condition
+    if type(cond) ~= "function" then error("if_node: expected condition function", 0) end
+    local ok, val = pcall(cond, results)
+    if not ok then error("if_node: condition failed: " .. tostring(val), 0) end
+    local route = val and "true" or "false"
+    results["_route_" .. n.id] = route
+    return nil  -- if_node 不产生数据行
+  elseif typ == "switch_node" then
+    -- 评估选择器：selector(results) → string
+    local sel = n.selector
+    if type(sel) ~= "function" then error("switch_node: expected selector function", 0) end
+    local ok, val = pcall(sel, results)
+    if not ok then error("switch_node: selector failed: " .. tostring(val), 0) end
+    local route = tostring(val)
+    results["_route_" .. n.id] = route
+    return nil  -- switch_node 不产生数据行
   else
     error("pipeline: unknown node type " .. tostring(typ), 0)
   end
+end
+
+-- 执行 Pipeline（先 compile 再逐节点执行）
+-- 返回 { node_results = { id = rows, ... } }，失败节点标记 "failed:<err>"
+function etl.pipeline(p)
+  local c = etl.compile(p)
+  local results = {}
+  for _, id in ipairs(c.order) do
+    local n = c.nodes[id]
+
+    -- 路由检查：下游节点有 route 字段，检查依赖的 if_node/switch_node 结果是否匹配
+    if n.route then
+      local dep = n.deps and n.deps[1]
+      local route_key = "_route_" .. (dep or "")
+      if results[route_key] ~= n.route then
+        -- 路由不匹配，跳过此节点
+        results[n.id] = "skipped"
+        goto continue
+      end
+    end
+
+    -- 重试循环
+    local max_retries = (n.retry and type(n.retry) == "table" and n.retry.max) or 0
+    local backoff = (n.retry and type(n.retry) == "table" and n.retry.backoff) or 1.0
+    local timeout = n.timeout or 0
+    local t_start = os.clock()
+    local ok, res = false, nil
+    local last_dt = 0
+
+    for attempt = 0, max_retries do
+      -- 超时检查（包括重试总时间）
+      if timeout > 0 then
+        local elapsed = os.clock() - t_start
+        if elapsed >= timeout then
+          res = "timeout after " .. tostring(math.floor(elapsed)) .. "s (max " .. tostring(timeout) .. "s)"
+          break
+        end
+      end
+
+      local t0 = os.clock()
+      ok, res = pcall(function() return etl.run_node(n, results) end)
+      last_dt = math.floor((os.clock() - t0) * 1000)
+
+      if ok then
+        break
+      end
+
+      -- 失败且有重试次数：退避等待后重试
+      if attempt < max_retries then
+        local sleep_s = backoff * (2 ^ attempt)
+        busy_sleep(sleep_s)
+      end
+    end
+
+    if ok then
+      etl.log(0, "node:" .. n.id, '{"type":"' .. tostring(n.type) .. '"}', last_dt, res or 0, true, nil)
+      results[n.id] = res
+    else
+      local total_dt = math.floor((os.clock() - t_start) * 1000)
+      etl.log(0, "node:" .. n.id, '{"type":"' .. tostring(n.type) .. '"}', total_dt, 0, false, tostring(res))
+
+      if n.on_error then
+        -- 有错误恢复：标记失败，继续管道
+        results[n.id] = "failed:" .. tostring(res)
+        results["_err_" .. n.id] = tostring(res)
+      else
+        error("pipeline[" .. tostring(c.name) .. "] node '" .. n.id .. "' failed: " .. tostring(res), 0)
+      end
+    end
+    ::continue::
+  end
+  return results
 end
 
 return etl

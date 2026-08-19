@@ -304,13 +304,19 @@ end
 
 -- ============ 工具 ============
 -- 扁平行主序 Lua 表 → double*（行主序）；返回 a, m, n
--- 输入：p.a = [1,2,3,4,...]（行主序扁平），p.m/p.n = 维度
-local function flat_row(p, key)
+-- 输入：p.a = [1,2,3,4,...]（行主序扁平），p.m/p.n = 维度；
+--       可选 dm/dn 覆盖维度（matmul 的 b 矩阵用 p.mb/p.nb 传入，见文件头示例）
+local function flat_row(p, key, dm, dn)
   local t = p[key] or {}
-  local m = tonumber(p.m) or 0
-  local n = m > 0 and (#t / m) or (#t > 0 and math.sqrt(#t) or 0)
+  local m = tonumber(dm or p.m) or 0
+  local n = tonumber(dn) or (m > 0 and (#t / m) or (#t > 0 and math.sqrt(#t) or 0))
   if m == 0 and n > 0 and n == math.floor(n) then
     m = n -- 方阵缺省：n = sqrt(len) → m = n
+  end
+  -- 非整数 n（推导出的维度除不尽，如 len=4/mb=3 → n=1.333）必须报错，
+  -- 否则 FFI 静默截断成 int 算错结果（2026-08-19 实测踩坑）
+  if n > 0 and n ~= math.floor(n) then
+    return nil, nil, nil, 'dim mismatch: n=' .. tostring(n) .. ' not integer (m=' .. tostring(m) .. ', len=' .. #t .. ')'
   end
   if m * n ~= #t then
     return nil, nil, nil, 'dim mismatch: m*n=' .. (m * n) .. ' vs len=' .. #t
@@ -364,7 +370,7 @@ end
 local function op_matmul(p)
   local A, m, k, err = flat_row(p, 'a')
   if err then return { status = 'Error', message = 'matmul a: ' .. err } end
-  local B, k2, n, err2 = flat_row(p, 'b')
+  local B, k2, n, err2 = flat_row(p, 'b', p.mb, p.nb)
   if err2 then return { status = 'Error', message = 'matmul b: ' .. err2 } end
   if k ~= k2 then
     return { status = 'Error', message = 'matmul: inner dims mismatch ' .. k .. ' vs ' .. k2 }
@@ -580,7 +586,7 @@ end
 local function gpu_matmul(g, p)
   local A, m, k, err = flat_row(p, 'a')
   if err then return { status = 'Error', message = 'matmul a: ' .. err } end
-  local B, k2, n, err2 = flat_row(p, 'b')
+  local B, k2, n, err2 = flat_row(p, 'b', p.mb, p.nb)
   if err2 then return { status = 'Error', message = 'matmul b: ' .. err2 } end
   if k ~= k2 then
     return { status = 'Error', message = 'matmul: inner dims mismatch ' .. k .. ' vs ' .. k2 }

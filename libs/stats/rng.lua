@@ -92,6 +92,10 @@ ffi.cdef[[
     double rng_weibull(double shape, double scale);
     double rng_erlang(double shape, double rate);
     double rng_gumbel(double mu, double beta);
+    double rng_skew_normal(double xi, double omega, double alpha);
+    double rng_inverse_gaussian(double mu, double lambda);
+    double rng_frechet(double mu, double sigma, double alpha);
+    double rng_pert(double min, double max, double mode);
 
     double rng_bernoulli(double p);
     double rng_binomial(double n, double p);
@@ -100,6 +104,8 @@ ffi.cdef[[
     double rng_neg_binomial(double r, double p);
     double rng_poisson(double lambda);
     double rng_discrete_uniform(int64_t lo, int64_t hi);
+    double rng_zeta(double s);
+    double rng_zipf(double s, double n);
 
     int rng_mvnormal(const double* mean, const double* cov, int dim, double* out);
     int rng_mvt(const double* mean, const double* scale, double df, int dim, double* out);
@@ -271,6 +277,14 @@ function M.run(op)
             return json_encode(rng.rng_erlang(op.shape, op.rate or 1))
         elseif o == 'gumbel' then
             return json_encode(rng.rng_gumbel(op.mu or 0, op.beta or 1))
+        elseif o == 'skew_normal' then
+            return json_encode(rng.rng_skew_normal(op.xi or 0, op.omega or 1, op.alpha or 0))
+        elseif o == 'inverse_gaussian' then
+            return json_encode(rng.rng_inverse_gaussian(op.mu, op.lambda))
+        elseif o == 'frechet' then
+            return json_encode(rng.rng_frechet(op.mu or 0, op.sigma or 1, op.alpha))
+        elseif o == 'pert' then
+            return json_encode(rng.rng_pert(op.min, op.max, op.mode))
 
         -- 离散分布
         elseif o == 'bernoulli' then
@@ -287,6 +301,10 @@ function M.run(op)
             return json_encode(rng.rng_poisson(op.lambda))
         elseif o == 'discrete_uniform' then
             return json_encode(rng.rng_discrete_uniform(op.lo or 0, op.hi or 1))
+        elseif o == 'zeta' then
+            return json_encode(rng.rng_zeta(op.s))
+        elseif o == 'zipf' then
+            return json_encode(rng.rng_zipf(op.s, op.n or 1))
 
         -- 多元分布
         elseif o == 'mvnormal' then

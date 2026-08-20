@@ -96,6 +96,13 @@ ffi.cdef[[
     double rng_inverse_gaussian(double mu, double lambda);
     double rng_frechet(double mu, double sigma, double alpha);
     double rng_pert(double min, double max, double mode);
+    double rng_logistic(double mu, double s);
+    double rng_rayleigh(double sigma);
+    double rng_half_normal(double sigma);
+    double rng_nakagami(double mu, double omega);
+    double rng_rician(double nu, double sigma);
+    double rng_generalized_pareto(double shape, double scale, double loc);
+    double rng_generalized_extreme_value(double shape, double loc, double scale);
 
     double rng_bernoulli(double p);
     double rng_binomial(double n, double p);
@@ -285,6 +292,20 @@ function M.run(op)
             return json_encode(rng.rng_frechet(op.mu or 0, op.sigma or 1, op.alpha))
         elseif o == 'pert' then
             return json_encode(rng.rng_pert(op.min, op.max, op.mode))
+        elseif o == 'logistic' then
+            return json_encode(rng.rng_logistic(op.mu or 0, op.s or 1))
+        elseif o == 'rayleigh' then
+            return json_encode(rng.rng_rayleigh(op.sigma))
+        elseif o == 'half_normal' then
+            return json_encode(rng.rng_half_normal(op.sigma))
+        elseif o == 'nakagami' then
+            return json_encode(rng.rng_nakagami(op.mu, op.omega))
+        elseif o == 'rician' then
+            return json_encode(rng.rng_rician(op.nu, op.sigma))
+        elseif o == 'generalized_pareto' then
+            return json_encode(rng.rng_generalized_pareto(op.shape, op.scale, op.loc or 0))
+        elseif o == 'generalized_extreme_value' then
+            return json_encode(rng.rng_generalized_extreme_value(op.shape, op.loc or 0, op.scale))
 
         -- 离散分布
         elseif o == 'bernoulli' then

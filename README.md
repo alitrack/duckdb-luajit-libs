@@ -10,7 +10,7 @@ Works with [duckdb-luajit](https://github.com/alitrack/duckdb-luajit). Formats D
 
 | Directory | Purpose | Examples |
 |---|---|---|
-| `libs/datasource/` | **Data sources** — read files/dirs/formats DuckDB cannot | dicom (medical imaging), dirscan (directory metadata) |
+| `libs/datasource/` | **Data sources** — read files/dirs/formats DuckDB cannot | dicom (medical imaging), dirscan (directory metadata), tdx (TDX stock data) |
 | `libs/export/` | **Export** — stored-procedure style COPY export (query/table → parquet/csv/json) | export (one COPY TO in Lua) |
 | `libs/etl/` | **ETL flow layer** — audit log, idempotent load validation, error self-healing, componentized SQL | etl (audit/validate/safe/q) |
 | `libs/parser/` | **Parsers** — data structures / text (JSON/CSV/XML…) | json (vendored rxi/json.lua) |
@@ -41,6 +41,7 @@ Works with [duckdb-luajit](https://github.com/alitrack/duckdb-luajit). Formats D
 | `libs/linalg/linalg.lua` | linalg | Linear algebra via LuaJIT FFI → system LAPACK/OpenBLAS (40-yr industry standard, same kernels as MATLAB/R/numpy) — `matmul`/`svd`/`eigh`/`inv`/`lu`/`chol`/`qr`/`norm`, flat row-major `DOUBLE[]`+m/n in → flat out; 10 anchored cases incl. 3×2 SVD (U·Σ·Vᵀ=A) | libopenblas.so (system, `LUALINALG_LIB` to override) |
 | `libs/ffi/sudoku/` (sudoku_solve.c/.rs + README) | ffi | Same solver in C/Rust via LuaJIT FFI (`ffi.load`), ~7× faster than Lua reference — source, not INDEX-installable; compile `.so` then load by path | gcc/rustc (build-time) |
 | `libs/etl/etl.lua` | etl | ETL flow layer: audit log (`etl.log`/`etl.run`), idempotent load validation (`etl.validate`), error self-healing (`etl.safe`/`etl.insert_auto`), componentized SQL (`etl.q`/`etl.query`) — needs normal mode (non-trusted) for `_duckdb_call`/`_duckdb_query` | none |
+| `libs/datasource/tdx.lua` | datasource | TDX (通达信) stock market data: .lc1/.lc5/.day format parser, 32-byte/record, little-endian | none (ffi) |
 
 ## One-SQL Install Protocol (v0.31+ recommended: `install` / `list_remote`)
 
@@ -51,7 +52,7 @@ LOAD 'luajit';
 
 -- 0. List available libs (INDEX protocol, cached automatically)
 SELECT * FROM luajit_module(mode := 'list_remote');
--- → available libs: dicom / dirscan / export / json / base64 / crc32 / uuid / html_escape / sudoku
+-- → available libs: dicom / dirscan / export / json / base64 / crc32 / uuid / html_escape / sudoku / tdx
 
 -- 1. Install & register with one statement (scalar UDFs callable right away)
 SELECT * FROM luajit_module(mode := 'install', sql_name := 'base64');

@@ -11,7 +11,7 @@ English README: [README.md](README.md)
 
 | 目录 | 定位 | 示例 |
 |---|---|---|
-| `libs/datasource/` | **数据源**——读文件/目录/格式，补 DuckDB 读不了的数据 | dicom（医疗影像）、dirscan（目录元数据）、inv_ofd（数电发票 OFD 解析） |
+| `libs/datasource/` | **数据源**——读文件/目录/格式，补 DuckDB 读不了的数据 | dicom（医疗影像）、dirscan（目录元数据）、inv_ofd（数电发票 OFD 解析）、tdx（通达信行情数据） |
 | `libs/export/` | **导出**——存储过程式 COPY 导出（query/表 → parquet/csv/json） | export（Lua 里一条 COPY TO） |
 | `libs/etl/` | **ETL 流程层**——审计日志、幂等加载校验、错误自愈、SQL 组件化、增量加载、缓慢变化维度 | etl（audit/validate/safe/q）、incremental、scd2 |
 | `libs/parser/` | **解析器**——数据结构/文本解析（JSON/CSV/XML…） | json（vendored rxi/json.lua）、zip_list（zip 清单）、unzip（deflate 解压） |
@@ -44,6 +44,7 @@ English README: [README.md](README.md)
 | `libs/etl/etl.lua` | etl | ETL 流程层：审计日志（`etl.log`/`etl.run`）、幂等加载校验（`etl.validate`）、错误自愈（`etl.safe`/`etl.insert_auto`）、SQL 组件化（`etl.q`/`etl.query`）——需普通模式（非 trusted）用 `_duckdb_call`/`_duckdb_query` | 无 |
 | `libs/etl/incremental.lua` | incremental | 增量加载：水位游标（`etl_watermark` 表），`ts`/`id`/`ts_id` 三种游标模式，只加载新行，返回 JSON（`loaded`/`last_ts`/`last_id`）——需普通模式 | 无 |
 | `libs/etl/scd2.lua` | scd2 | 缓慢变化维度类型 2：属性指纹（md5）对比，自动建表（`_valid_from`/`_valid_to`/`_is_current`/`_version`），关闭旧版本 + 插入新版本，幂等——需普通模式 | 无 |
+| `libs/datasource/tdx.lua` | datasource | 通达信（TDX）股票行情数据：.lc1/.lc5/.day 格式解析，32字节/记录，小端序 | 无（ffi） |
 
 ### 增量加载 × DuckLake 数据湖（实测组合）
 
@@ -76,7 +77,7 @@ LOAD 'luajit';
 
 -- 0. 看仓库里有哪些库（INDEX 协议，自动缓存）
 SELECT * FROM luajit_module(mode := 'list_remote');
--- → available libs: dicom / dirscan / export / json / base64 / crc32 / uuid / html_escape / iconv / llm_extract / zip_list / unzip / inv_ofd / incremental / scd2
+-- → available libs: dicom / dirscan / export / json / base64 / crc32 / uuid / html_escape / iconv / llm_extract / zip_list / unzip / inv_ofd / incremental / scd2 / tdx
 
 -- 1. 一条 SQL 装库并注册（标量 UDF 直接可调用）
 SELECT * FROM luajit_module(mode := 'install', sql_name := 'base64');

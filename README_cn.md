@@ -31,6 +31,7 @@ English README: [README.md](README.md)
 | `libs/parser/yaml.lua` | parser | YAML 解析/编码（自包含纯 Lua）——嵌套映射/序列、行内流式、块标量、注释、标量类型；`op=load` YAML→JSON（配 `json_extract`），`op=encode` JSON→YAML。支持子集诚实标注（无锚点/别名/多文档） | 无 |
 | `libs/parser/xml.lua` | parser | XML 解析（自包含纯 Lua，xml2js 风格对象化：属性→`@名`、重复子标签→数组、叶子文本→字符串）。`op=load` XML→JSON；`op=find` 简单路径 `//tag/sub`；`op=attr` 取属性；`op=text` 去标签纯文本（保序） | 无 |
 | `libs/parser/log.lua` | parser | 日志归一化表函数：自动识别 JSON-lines / nginx access / syslog / epoch / ISO 行 → `line_no\|ts\|level\|msg\|kvs(JSON)`，ts 统一 ISO8601；内联多行或文件路径两用 | 无（读文件需普通模式） |
+| `libs/parser/tomlini.lua` | parser | TOML + INI 配置解析→JSON（自包含纯 Lua）：TOML 分组/`[a.b]` 嵌套/点路径 key/行内表 `{}`/行内数组/多行字符串/单引号字面量/注释；INI 分组/`[=:]` 赋值/`;`与`#` 注释/类型嗅探。`op=toml` 或 `op=ini` → JSON，配 `json_extract` 抽取。诚实边界：无 date-time 专门类型/数组表 `[[..]]`/多文档 | 无 |
 | `libs/parser/id3.lua` | parser | MP3 ID3v2 标签解析（TIT2/TPE1/TALB/TYER/TRCK/TCON；ISO-8859-1/UTF-16/UTF-8）——表模式：文件列表 → 扁平行 | 无 |
 | `libs/parser/zip_list.lua` | parser | ZIP 中央目录文件清单（文件名\|压缩方法\|压缩大小\|原始大小\|CRC32），无需解压 | 无 |
 | `libs/parser/unzip.lua` | parser | ZIP 解压指定文件（FFI 调 zlib raw inflate，windowBits=-15）——OFD/EPUB/DOCX/xlsx 等 zip 容器读取第一步；中央目录提供原始大小 → 一次分配输出缓冲 | zlib（Linux/macOS 内置；Windows zlib1.dll） |
@@ -42,6 +43,7 @@ English README: [README.md](README.md)
 | `libs/udf/iconv.lua` | udf | 字符编码全家桶：`enc_detect`（BOM→UTF-8 严格校验→GB18030/GBK 特征）、`convert`（FFI 调 libc iconv，//IGNORE 语义剔除半个字/孤立字节，E2BIG 不静默截断）、`file`（GBK 等任意编码文件 → UTF-8 临时文件，喂 `read_csv`/`COPY`）、`lang`（ISO 639-1 语言检测：字符区间 15 语言 + 拉丁停用词细分）——read_csv 的 encoding 只支持 utf-8/utf-16/latin-1，中文编码是真空位 | 无（FFI libc iconv：Linux/macOS 内置；Windows 需 libiconv-2.dll，放 PATH 或设 `LUAJIT_ICONV_LIB` 指定路径） |
 | `libs/udf/llm_extract.lua` | udf | 把「LLM 结构化信息提取」封装成 SQL 函数——调任意 OpenAI 兼容端点（默认本地 vLLM），schema + few-shot 约束输出 JSON，再交给 `json_extract` 展开。合同/公告/评论/简历批量字段提取、复杂语言识别一把梭；reasoning 模型默认 `enable_thinking=false` 关思考（`p.thinking=true` 开启）；端点可配（`p.endpoint` / 环境变量 `LLM_EXTRACT_ENDPOINT`） | curl CLI |
 | `libs/udf/cncheck.lua` | udf | 中国数据校验位算法全家桶（纯 Lua）：`id_card` 身份证 18 位（GB 11643 加权校验位 + X，兼容 15 位抽取）、`uscc` 统一社会信用代码 18 位（GB 32100，31 字符集 mod 31）、`bank_card` 银行卡 Luhn（13–19 位）、`phone` 手机号（1[3-9] 段）、`id_extract` 身份证→区划/出生/性别。各返回 `{valid,reason}` JSON，`json_extract` 取 `$.valid` | 无 |
+| `libs/udf/fuzzy.lua` | udf | 字符串相似度/距离（纯 Lua，**UTF-8 代码点感知**）：`lev` 编辑距离、`normlev` 归一化、`jaro`/`jw` Jaro-Winkler、`sim` 选指标、`simrank` 候选列表打分降序（记录链接/姓名匹配/去重核心）。中文按 1 个代码点处理（避免字节级退化：王小明 vs 王小民 字节级 jw=1.0，代码点级=0.8889）；JW 前缀上限 4（经典） | 无 |
 | `libs/mcp/` (mcp-server.sql + sudoku.lua) | mcp | DuckDB 作为 MCP server 暴露 Lua UDF 给 AI（duckdb_mcp + luajit 合体） | duckdb_mcp 扩展 |
 | `libs/mcp/sudoku.lua` | mcp | 数独求解器（81 位题面 → 解，锚点验证）——模块表库：install 后 compile 包装成 UDF | 无 |
 | `libs/ffi/sudoku/` (sudoku_solve.c/.rs + README) | ffi | 同求解器的 C/Rust 版，LuaJIT FFI（`ffi.load`）调用，比 Lua 参考版快 ~7×——源码非 INDEX 可装库；编译 .so 后按路径加载 | gcc/rustc（构建时） |

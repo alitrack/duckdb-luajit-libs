@@ -4,6 +4,7 @@ export|libs/export/export.lua
 json|libs/parser/json.lua
 yaml|libs/parser/yaml.lua
 xml|libs/parser/xml.lua
+log|libs/parser/log.lua
 base64|libs/udf/base64.lua
 crc32|libs/udf/crc32.lua
 uuid|libs/udf/uuid.lua

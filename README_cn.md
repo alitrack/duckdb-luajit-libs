@@ -7,6 +7,10 @@ DuckDB 的 Lua 库仓库：**一条 SQL 从仓库加载函数/表函数**，无�
 
 English README: [README.md](README.md)
 
+> **规模（2026-08）**：40 个库，手写 Lua 逻辑 ≈ **1.16 万行**（另含 pinyin 内嵌
+> vendored 词典 17.8 万行数据）；配套测试 SQL 1454 行 + 独立 oracle 交叉校验脚本
+> 132 行。每个库"真实编译跑通 + 实测输出 + 独立交叉校验 + PoC 证据"。
+
 ## 分类
 
 | 目录 | 定位 | 示例 |
@@ -15,7 +19,8 @@ English README: [README.md](README.md)
 | `libs/export/` | **导出**——存储过程式 COPY 导出（query/表 → parquet/csv/json） | export（Lua 里一条 COPY TO） |
 | `libs/etl/` | **ETL 流程层**——审计日志、幂等加载校验、错误自愈、SQL 组件化、增量加载、缓慢变化维度 | etl（audit/validate/safe/q）、incremental、scd2 |
 | `libs/parser/` | **解析器**——数据结构/文本解析（JSON/JSONPath/YAML/XML/TOML/INI/Markdown/RSS/CSV/HTML/EPUB/日志…） | json（vendored rxi/json.lua）、yaml、xml、tomlini、markdown、jsonpatch、jsonpath、rss、csvdialect、htmlx、epub、zip_list（zip 清单）、unzip（deflate 解压）、id3 |
-| `libs/udf/` | **标量函数**——算法/编码/数学/字符串/网络/LLM UDF | base64、crc32、uuid、html_escape、iconv（编码检测/转码/语言检测）、cncheck（身份证/统一社会信用代码/银行卡/手机校验位）、fuzzy（相似度/距离）、tail_file（增量 tail）、qr（二维码生成）、cidr（网络 CIDR/IPv4/6）、llm_extract（LLM 结构化提取） |
+| `libs/udf/` | **标量函数**——算法/编码/数学/字符串/网络/LLM UDF | base64、crc32、uuid、html_escape、iconv（编码检测/转码/语言检测）、cncheck（身份证/统一社会信用代码/银行卡/手机校验位 + 15→18 位转换）、fuzzy（相似度/距离）、tail_file（增量 tail）、qr（二维码生成）、cidr（网络 CIDR/IPv4/6）、pinyin（中文→拼音，pypinyin 词典 vendored）、llm_extract（LLM 结构化提取） |
+| `libs/tooling/` | **工具**——仓库自维护/批量操作 | init（从 INDEX 批量 dofile+注册全部/指定库，离线可用） |
 | `libs/network/` | **网络/API**——HTTP/签名/私域 API 数据源 | （规划：signed-api、http 抓取） |
 | `libs/ffi/` | **FFI 绑定**——系统 C 库（dcmtk/open62541…）/编译型求解器 | sudoku（C/Rust 版，比 Lua 参考版快 ~7×，[libs/ffi/sudoku](libs/ffi/sudoku/README_cn.md)） |
 | `libs/mcp/` | **MCP 集成**——DuckDB 作为 MCP server，把 Lua UDF 发布成 tools 给 AI 助手调用 | mcp-server（sudoku_solve 示例） |
@@ -39,6 +44,8 @@ English README: [README.md](README.md)
 | `libs/parser/jsonpath.lua` | parser | RFC 9535 JSONPath 实用子集（自含纯 Lua）：成员/数组索引(0-based/负)/通配 `*`/递归下降 `$..x`/过滤谓词 `[?(@.p op 字面量)]`（`=` `!=` `<` `<=` `>` `>=` + `and` 组合，`@.key` 存在性）。DuckDB `json_extract` 只支持简单路径，不支持通配/递归/过滤。结果按文档顺序（解码保留键序） | 无 |
 | `libs/parser/csvdialect.lua` | parser | CSV 方言探测 + 纯 Lua 状态机解析（自含）：`detect`（delimiter `,;tab|` + quote/doublequote/skipinitialspace/`has_header` 启发式）、`parse`（引号内嵌分隔符/双引号转义/多行 → 二维数组）、`rows`/`ncols`；`file` 参数读盘。DuckDB read_csv 采样嗅探对短/多行/分号文件常误判，本库确定性探测 | 无 |
 | `libs/parser/htmlx.lua` | parser | HTML→结构化抽取（自含纯 Lua）：`title`、`links`[{href,text}]、`tables`[{rows:[[cell]]}]、`text`（去标签可见纯文本）、`feed`（一次全取）；剔除 head/script/style/注释，大小写不敏感 + 未闭合容错 + void 元素，`file` 参数读盘。配 rss 做内容抽取 | 无 |
+| `libs/udf/pinyin.lua` | udf | 中文→拼音（vendored pypinyin 0.55.0 词典 41923 字符 + 47111 词组，单文件 ~5MB 自包含，纯 Lua 零 FFI）：逐字最长词组匹配解多音字语境（"重庆"→chóngqìng、"一丁不识"→yīdīngbùshí）+ 字符表回退；`op` pinyin/join/first，`style` tones/notones，`unknown` ?/keep。ASCII/数字逐字透传，无映射非 ASCII→`?` | 无 |
+| `libs/tooling/init.lua` | tooling | 仓库批量注册入口：从本地 INDEX 一次性 dofile+注册全部（`op='all'`）/指定子集（`op='some'`+names）/只列名（`list`/`names`），注册后 `luajit_s('jsonpath',…)` 等直接可调，免逐库 install；离线可用（本地 INDEX）。dofile 失败（FFI 依赖缺失）记 `skipped` 不中断 | 无 |
 | `libs/parser/zip_list.lua` | parser | ZIP 中央目录文件清单（文件名\|压缩方法\|压缩大小\|原始大小\|CRC32），无需解压 | 无 |
 | `libs/parser/unzip.lua` | parser | ZIP 解压指定文件（FFI 调 zlib raw inflate，windowBits=-15）——OFD/EPUB/DOCX/xlsx 等 zip 容器读取第一步；中央目录提供原始大小 → 一次分配输出缓冲 | zlib（Linux/macOS 内置；Windows zlib1.dll） |
 | `libs/parser/epub.lua` | parser | EPUB 电子书解析（自包含，内嵌 zip 中央目录 + raw inflate，逐字移植自 unzip.lua）：`metadata`（title/creators/language/identifier/publisher/date/version/cover_href，命名空间容忍抽 OPF）、`toc`（EPUB2 NCX navPoint / EPUB3 nav type=toc → [{play_order,label,href}]）、`text`（指定 href 章节去标签纯文本，剥离 head/script/style）、`info`（opf_path/version/doc_count）。container.xml 自动定位 OPF | zlib（读文件需普通模式） |
@@ -49,7 +56,7 @@ English README: [README.md](README.md)
 | `libs/udf/html_escape.lua` | udf | HTML 实体转义/反转义 | 无 |
 | `libs/udf/iconv.lua` | udf | 字符编码全家桶：`enc_detect`（BOM→UTF-8 严格校验→GB18030/GBK 特征）、`convert`（FFI 调 libc iconv，//IGNORE 语义剔除半个字/孤立字节，E2BIG 不静默截断）、`file`（GBK 等任意编码文件 → UTF-8 临时文件，喂 `read_csv`/`COPY`）、`lang`（ISO 639-1 语言检测：字符区间 15 语言 + 拉丁停用词细分）——read_csv 的 encoding 只支持 utf-8/utf-16/latin-1，中文编码是真空位 | 无（FFI libc iconv：Linux/macOS 内置；Windows 需 libiconv-2.dll，放 PATH 或设 `LUAJIT_ICONV_LIB` 指定路径） |
 | `libs/udf/llm_extract.lua` | udf | 把「LLM 结构化信息提取」封装成 SQL 函数——调任意 OpenAI 兼容端点（默认本地 vLLM），schema + few-shot 约束输出 JSON，再交给 `json_extract` 展开。合同/公告/评论/简历批量字段提取、复杂语言识别一把梭；reasoning 模型默认 `enable_thinking=false` 关思考（`p.thinking=true` 开启）；端点可配（`p.endpoint` / 环境变量 `LLM_EXTRACT_ENDPOINT`） | curl CLI |
-| `libs/udf/cncheck.lua` | udf | 中国数据校验位算法全家桶（纯 Lua）：`id_card` 身份证 18 位（GB 11643 加权校验位 + X，兼容 15 位抽取）、`uscc` 统一社会信用代码 18 位（GB 32100，31 字符集 mod 31）、`bank_card` 银行卡 Luhn（13–19 位）、`phone` 手机号（1[3-9] 段）、`id_extract` 身份证→区划/出生/性别。各返回 `{valid,reason}` JSON，`json_extract` 取 `$.valid` | 无 |
+| `libs/udf/cncheck.lua` | udf | 中国数据校验位算法全家桶（纯 Lua）：`id_card` 身份证 18 位（GB 11643 加权校验位 + X，兼容 15 位抽取）、`id_15to18` 15 位→18 位转换（插 '19' + 重算校验位）、`uscc` 统一社会信用代码 18 位（GB 32100，31 字符集 mod 31）、`bank_card` 银行卡 Luhn（13–19 位）、`phone` 手机号（1[3-9] 段）、`id_extract` 身份证→区划/出生/性别。各返回 `{valid,reason}` JSON，`json_extract` 取 `$.valid` | 无 |
 | `libs/udf/fuzzy.lua` | udf | 字符串相似度/距离（纯 Lua，**UTF-8 代码点感知**）：`lev` 编辑距离、`normlev` 归一化、`jaro`/`jw` Jaro-Winkler、`sim` 选指标、`simrank` 候选列表打分降序（记录链接/姓名匹配/去重核心）。中文按 1 个代码点处理（避免字节级退化：王小明 vs 王小民 字节级 jw=1.0，代码点级=0.8889）；JW 前缀上限 4（经典） | 无 |
 | `libs/udf/tail_file.lua` | udf | 增量日志/文件 tail（纯 Lua，无状态偏移状态机）：`tail` 从上次字节偏移续读新增行 → `{offset,count,lines}`（未完结行暂吐、下次补全；文件截断/重建自动重置 offset；`max` 限制条数）。DuckDB 无内建增量读，配合应用存回的 offset 做轮询消费 | 无（读文件需普通模式） |
 | `libs/udf/qr.lua` | udf | QR 码生成（纯 Lua，自包含，无 FFI）：`matrix`（模块二维数组 1=黑）、`svg`（可扫 SVG）、`ascii`（终端预览）、`info`（version/size/ec/mask）、`codewords`（数据+Reed-Solomon 码字 hex）。Byte 模式（任意 UTF-8）、EC 级别 L/M/Q/H、自动选 mask（penalty 最小）。**正确性经 python-qrcode 独立实现交叉校验：codewords 逐字节 IDENTICAL**（见 qr_verify.py） | 无 |

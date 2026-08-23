@@ -6,6 +6,11 @@ Works with [duckdb-luajit](https://github.com/alitrack/duckdb-luajit). Formats D
 
 中文版说明见 [README_cn.md](README_cn.md).
 
+> **Size (2026-08)**: 40 libraries, ~**11.6k hand-written Lua logic lines** (plus a
+> 178k-line vendored pinyin dictionary embedded in `pinyin.lua`); +1454 lines of test SQL
+> and 132 lines of independent oracle cross-check scripts. Every lib: real compile +
+> measured output + independent cross-check + PoC evidence.
+
 ## Categories
 
 | Directory | Purpose | Examples |
@@ -14,7 +19,8 @@ Works with [duckdb-luajit](https://github.com/alitrack/duckdb-luajit). Formats D
 | `libs/export/` | **Export** — stored-procedure style COPY export (query/table → parquet/csv/json) | export (one COPY TO in Lua) |
 | `libs/etl/` | **ETL flow layer** — audit log, idempotent load validation, error self-healing, componentized SQL | etl (audit/validate/safe/q) |
 | `libs/parser/` | **Parsers** — data structures / text (JSON/JSONPath/YAML/XML/TOML/INI/Markdown/RSS/CSV/HTML/EPUB/logs…) | json (vendored rxi/json.lua), yaml, xml, tomlini, markdown, jsonpatch, jsonpath, rss, csvdialect, htmlx, epub, zip_list, unzip, id3 |
-| `libs/udf/` | **Scalar UDFs** — algorithms / encodings / math / string / network / QR | base64, crc32, uuid, html_escape, iconv, cncheck, fuzzy, tail_file, qr, cidr, llm_extract |
+| `libs/udf/` | **Scalar UDFs** — algorithms / encodings / math / string / network / QR | base64, crc32, uuid, html_escape, iconv, cncheck (incl. 15→18 ID conversion), fuzzy, tail_file, qr, cidr, pinyin (zh→pinyin, vendored pypinyin dict), llm_extract |
+| `libs/tooling/` | **Tooling** — repo self-maintenance / batch ops | init (batch dofile+register all/some libs from INDEX, offline) |
 | `libs/network/` | **Network/API** — HTTP / signed / private API data sources | (planned: signed-api, http fetch) |
 | `libs/optimize/` | **Optimization** — LP/QP/MILP solvers (HiGHS via FFI) | highs (diet problem demo) |
 | `libs/linalg/` | **Linear algebra** — matmul/SVD/eigh/inv/LU/chol/QR (LAPACK/OpenBLAS via FFI) | linalg |
@@ -40,6 +46,8 @@ Works with [duckdb-luajit](https://github.com/alitrack/duckdb-luajit). Formats D
 | `libs/parser/jsonpath.lua` | parser | RFC 9535 JSONPath practical subset (self-contained pure Lua): members / array index (0-based/negative) / wildcard `*` / recursive descent `$..x` / filter predicate `[?(@.p op literal)]` (`=` `!=` `<` `<=` `>` `>=` + `and`, `@.key` existence). DuckDB `json_extract` only supports simple paths (no wildcard/recursive/filter). Results in document order (decoder preserves key order) | none |
 | `libs/parser/csvdialect.lua` | parser | CSV dialect detection + pure-Lua state-machine parser (self-contained): `detect` (delimiter `,;tab|` + quote/doublequote/skipinitialspace/`has_header` heuristic), `parse` (embedded delimiters/quote-doubling/multi-line → 2-D array), `rows`/`ncols`; `file` param. DuckDB read_csv sampling mis-detects short/multi-line/semicolon files; this is deterministic | none |
 | `libs/parser/htmlx.lua` | parser | HTML → structured extraction (self-contained pure Lua): `title`, `links`[{href,text}], `tables`[{rows:[[cell]]}], `text` (tag-stripped visible text), `feed` (all at once); strips head/script/style/comments, case-insensitive + unclosed-tag tolerant + void elements, `file` param. Pairs with rss for content extraction | none |
+| `libs/udf/pinyin.lua` | udf | Chinese → pinyin (vendored pypinyin 0.55.0 dictionary: 41923 chars + 47111 phrases, single ~5MB self-contained file, pure Lua no FFI): per-char longest-phrase match resolves polyphonic context ("重庆"→chóngqìng, "一丁不识"→yīdīngbùshí) + char-table fallback; `op` pinyin/join/first, `style` tones/notones, `unknown` ?/keep. ASCII/digits passed through per-char; unmapped non-ASCII → `?` | none |
+| `libs/tooling/init.lua` | tooling | Repo batch-register entry: dofile+register all (`op='all'`) / a named subset (`op='some'`+names) / just list names (`list`/`names`) from the local INDEX in one call, then `luajit_s('jsonpath',…)` etc. work directly — no per-lib install; offline (local INDEX). dofile failures (missing FFI deps) recorded in `skipped`, not fatal | none |
 | `libs/parser/zip_list.lua` | parser | ZIP central-directory file listing (name\|method\|compressed\|size\|CRC32), no extraction — table-mode | none |
 | `libs/parser/unzip.lua` | parser | ZIP extract a named file (FFI → zlib raw inflate, windowBits=-15) — first step for OFD/EPUB/DOCX/xlsx containers; central dir gives raw size → single output-buffer alloc | zlib (Linux/macOS built-in; Windows zlib1.dll) |
 | `libs/parser/epub.lua` | parser | EPUB e-book parser (self-contained, embeds zip central dir + raw inflate, ported verbatim from unzip.lua): `metadata` (title/creators/language/identifier/publisher/date/version/cover_href, namespace-tolerant OPF extract), `toc` (EPUB2 NCX navPoint / EPUB3 nav type=toc → [{play_order,label,href}]), `text` (named href chapter → tag-stripped text, head/script/style removed), `info` (opf_path/version/doc_count). container.xml auto-locates OPF | zlib (file read needs normal mode) |
@@ -47,7 +55,7 @@ Works with [duckdb-luajit](https://github.com/alitrack/duckdb-luajit). Formats D
 | `libs/udf/crc32.lua` | udf | CRC-32 checksum (IEEE 802.3, 8-digit uppercase hex) | LuaJIT bit |
 | `libs/udf/uuid.lua` | udf | UUID v4 generation (math.random, non-crypto) | LuaJIT bit |
 | `libs/udf/html_escape.lua` | udf | HTML entity escape/unescape | none |
-| `libs/udf/cncheck.lua` | udf | China data checksum suite (pure Lua): `id_card` 18-digit ID (GB 11643 weighted check digit + X, 15-digit extract), `uscc` 18-char unified social credit code (GB 32100, 31-char set mod 31), `bank_card` Luhn (13–19 digits), `phone` (1[3-9] prefix), `id_extract` ID→region/birth/sex. Each returns `{valid,reason}` JSON, read via `json_extract '$.valid'` | none |
+| `libs/udf/cncheck.lua` | udf | China data checksum suite (pure Lua): `id_card` 18-digit ID (GB 11643 weighted check digit + X, 15-digit extract), `id_15to18` 15-digit→18-digit conversion (insert '19' + recompute check digit), `uscc` 18-char unified social credit code (GB 32100, 31-char set mod 31), `bank_card` Luhn (13–19 digits), `phone` (1[3-9] prefix), `id_extract` ID→region/birth/sex. Each returns `{valid,reason}` JSON, read via `json_extract '$.valid'` | none |
 | `libs/udf/fuzzy.lua` | udf | String similarity/distance (pure Lua, **UTF-8 codepoint-aware**): `lev` edit distance, `normlev` normalized, `jaro`/`jw` Jaro-Winkler, `sim` pick metric, `simrank` rank a candidate list by score (record linkage / name matching / dedup). Chinese chars = 1 codepoint (avoids byte-level degeneracy: 王小明 vs 王小民 byte-level jw=1.0, codepoint-level=0.8889); JW prefix cap 4 (classic) | none |
 | `libs/udf/tail_file.lua` | udf | Incremental log/file tail (pure Lua, stateless offset state machine): `tail` resumes from a byte offset → `{offset,count,lines}` (incomplete trailing line held back until complete; auto-reset offset on truncation/rotation; `max` caps count). DuckDB has no built-in incremental read; pair with the app storing the returned offset for polling | none (file read needs normal mode) |
 | `libs/udf/qr.lua` | udf | QR code generation (pure Lua, self-contained, no FFI): `matrix` (2-D module array, 1=dark), `svg` (scannable SVG), `ascii` (terminal preview), `info` (version/size/ec/mask), `codewords` (data+Reed-Solomon codewords hex). Byte mode (any UTF-8), EC L/M/Q/H, auto mask (min penalty). **Correctness cross-verified byte-for-byte vs the independent python-qrcode implementation** (see qr_verify.py) | none |

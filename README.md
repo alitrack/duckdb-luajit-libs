@@ -29,12 +29,16 @@ Works with [duckdb-luajit](https://github.com/alitrack/duckdb-luajit). Formats D
 | `libs/datasource/dirscan.lua` | datasource | Directory scan: file types + EXIF (camera/time) + PDF /Info | none |
 | `libs/export/export.lua` | export | Stored-procedure export: `export({query\|tbl, file, format})` → COPY TO parquet/csv/json | none (needs normal mode, `_duckdb_call`) |
 | `libs/parser/json.lua` | parser | JSON parse/encode ([rxi/json.lua](https://github.com/rxi/json.lua), MIT) | none |
+| `libs/parser/yaml.lua` | parser | YAML parse/encode (self-contained pure Lua) — nested maps/seqs, inline flow, block scalars, comments, scalar types; `op=load` YAML→JSON (use with `json_extract`), `op=encode` JSON→YAML. Subset honestly documented (no anchors/aliases/multi-doc) | none |
+| `libs/parser/xml.lua` | parser | XML parser (self-contained pure Lua, xml2js-style: attrs→`@name`, repeated tags→array, leaf text→string). `op=load` XML→JSON; `op=find` simple path `//tag/sub`; `op=attr` get attribute; `op=text` strip tags to text (order-preserving) | none |
+| `libs/parser/log.lua` | parser | Log-normalization table function: auto-detect JSON-lines / nginx access / syslog / epoch / ISO lines → `line_no\|ts\|level\|msg\|kvs(JSON)`, ts unified to ISO8601; inline multi-line or file paths | none (file read needs normal mode) |
 | `libs/parser/id3.lua` | parser | MP3 ID3v2 tag parser (TIT2/TPE1/TALB/TYER/TRCK/TCON; ISO-8859-1/UTF-16/UTF-8) — table-mode: file list → flat rows | none |
 | `libs/parser/zip_list.lua` | parser | ZIP central-directory file listing (name\|method\|compressed\|size\|CRC32), no extraction — table-mode | none |
 | `libs/udf/base64.lua` | udf | Base64 codec (vendored [iskolbin/lbase64](https://github.com/iskolbin/lbase64) v1.5.3, public domain) | none |
 | `libs/udf/crc32.lua` | udf | CRC-32 checksum (IEEE 802.3, 8-digit uppercase hex) | LuaJIT bit |
 | `libs/udf/uuid.lua` | udf | UUID v4 generation (math.random, non-crypto) | LuaJIT bit |
 | `libs/udf/html_escape.lua` | udf | HTML entity escape/unescape | none |
+| `libs/udf/cncheck.lua` | udf | China data checksum suite (pure Lua): `id_card` 18-digit ID (GB 11643 weighted check digit + X, 15-digit extract), `uscc` 18-char unified social credit code (GB 32100, 31-char set mod 31), `bank_card` Luhn (13–19 digits), `phone` (1[3-9] prefix), `id_extract` ID→region/birth/sex. Each returns `{valid,reason}` JSON, read via `json_extract '$.valid'` | none |
 | `libs/mcp/` (mcp-server.sql + sudoku.lua) | mcp | DuckDB as MCP server exposing Lua UDFs to AI (duckdb_mcp + luajit) | duckdb_mcp ext |
 | `libs/mcp/sudoku.lua` | mcp | Sudoku solver (81-char puzzle → solution, anchor-verified) — module-table lib: install then `compile` a wrapper UDF | none |
 | `libs/optimize/highs.lua` | optimize | LP/QP/MILP solver via LuaJIT FFI → [HiGHS](https://github.com/ERGO-Code/HiGHS) (MIT, default LP/MIP solver in SciPy/MATLAB) — `{'op':'lp'\|'mip'\|'qp', ...}` → JSON result; diet/transport/QP anchor-verified vs CLI & hand-solved | libhighs.so (build-time, `LUAJIT_HIGHS_LIB` to override) |

@@ -5,7 +5,8 @@
 --       op='uscc'：统一社会信用代码 18 位（GB 32100-2015，31 字符集加权 mod 31）；
 --       op='bank_card'：银行卡 Luhn（MOD-10，13–19 位）；
 --       op='phone'：大陆手机号（11 位，1[3-9] 段近似，实用校验）；
---       op='id_extract'：身份证 → 区划/出生/性别 JSON。
+--       op='id_extract'：身份证 → 区划/出生/性别 JSON；
+--       op='id_15to18'：15 位老号 → 18 位（第 7 位前插 '19' + 重算校验位）。
 --       各校验 op 返回 JSON：{"valid":true|false,"reason":"..."}（配 json_extract 用）。
 -- @source: original（duckdb-luajit 系列，自包含无外部依赖）
 -- @requires: none
@@ -84,8 +85,27 @@ local function id_extract(v)
   local by = birth:sub(1, 4)
   local bm = birth:sub(5, 6)
   local bd = birth:sub(7, 8)
-  return '{"region":"' .. json_escape(region) .. '","birth":"' ..
+  return '{"region":"' .. json_escape(region) .. '","birth":"'..
          json_escape(by .. '-' .. bm .. '-' .. bd) .. '","sex":"' .. sex .. '"}'
+end
+
+-- 15 位老号 → 18 位（GB 11643-1999）：第 7 位前插 '19'（世纪假设 1900s），
+-- 末位按 17 位加权重算校验位（同 id_card 的 ID_WEIGHTS/ID_CHECK）。
+local function id_15to18(v)
+  local s = (tostring(v):gsub('%s+', ''):upper())
+  if #s ~= 15 then
+    return '{"id18":null,"error":"长度须为 15 位（18 位无需转换）"}'
+  end
+  if not s:match('^%d+$') then
+    return '{"id18":null,"error":"15 位老号须全数字"}'
+  end
+  local s17 = s:sub(1, 6) .. '19' .. s:sub(7, 15)
+  local sum = 0
+  for i = 1, 17 do
+    sum = sum + (tonumber(s17:sub(i, i)) or 0) * ID_WEIGHTS[i]
+  end
+  local check = ID_CHECK[tostring(sum % 11)]
+  return '{"id15":"' .. s .. '","id18":"' .. s17 .. check .. '"}'
 end
 
 -- ======================================================================
@@ -160,6 +180,7 @@ local OPS = {
   uscc = uscc_check,
   bank_card = bank_card_check,
   phone = phone_check,
+  id_15to18 = id_15to18,
 }
 
 return function(p)
@@ -174,7 +195,7 @@ return function(p)
   end
   local fn = OPS[op]
   if not fn then
-    return result(false, '未知 op：' .. op .. '（可选 id_card/uscc/bank_card/phone/id_extract）')
+    return result(false, '未知 op：' .. op .. '（可选 id_card/uscc/bank_card/phone/id_extract/id_15to18）')
   end
   return fn(v)
 end

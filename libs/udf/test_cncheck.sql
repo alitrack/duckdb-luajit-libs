@@ -37,3 +37,18 @@ SELECT json_extract(luajit_s('cncheck', {v: '91350100M000100Y44', op: 'uscc'}), 
 
 -- 11. 未知 op 优雅降级
 SELECT json_extract(luajit_s('cncheck', {v: 'x', op: 'nope'}), '$.valid') AS t11;  -- false
+
+-- 12. id_15to18：锚点（README 已验证的 18 位 11010519491231002X 的 15 位老号 → 转回）
+SELECT json_extract(luajit_s('cncheck', {v: '110105491231002', op: 'id_15to18'}), '$.id18') AS t12;  -- 11010519491231002X
+
+-- 13. id_15to18：普通样本（oracle 独立实现）
+SELECT json_extract(luajit_s('cncheck', {v: '350102681001001', op: 'id_15to18'}), '$.id18') AS t13,  -- 350102196810010012
+       json_extract(luajit_s('cncheck', {v: '440301760101002', op: 'id_15to18'}), '$.id18') AS t14;  -- 440301197601010025
+
+-- 14. id_15to18：转换结果应能通过 id_card 校验（闭环）
+SELECT json_extract(luajit_s('cncheck', {v: '110105491231002', op: 'id_15to18'}), '$.id18') AS conv14,
+       json_extract(luajit_s('cncheck', {v: '11010519491231002X', op: 'id_card'}), '$.valid') AS valid14;  -- true
+
+-- 15. id_15to18：错误处理（长度错 / 非数字 / 18 位输入）
+SELECT json_extract(luajit_s('cncheck', {v: '12345', op: 'id_15to18'}), '$.id18') AS e15a,   -- null
+       json_extract(luajit_s('cncheck', {v: '11010519491231002X', op: 'id_15to18'}), '$.id18') AS e15b;  -- null（18位）

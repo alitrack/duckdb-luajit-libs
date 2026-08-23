@@ -14,7 +14,7 @@ English README: [README.md](README.md)
 | `libs/datasource/` | **数据源**——读文件/目录/格式，补 DuckDB 读不了的数据 | dicom（医疗影像）、dirscan（目录元数据）、inv_ofd（数电发票 OFD 解析）、tdx（通达信行情数据） |
 | `libs/export/` | **导出**——存储过程式 COPY 导出（query/表 → parquet/csv/json） | export（Lua 里一条 COPY TO） |
 | `libs/etl/` | **ETL 流程层**——审计日志、幂等加载校验、错误自愈、SQL 组件化、增量加载、缓慢变化维度 | etl（audit/validate/safe/q）、incremental、scd2 |
-| `libs/parser/` | **解析器**——数据结构/文本解析（JSON/YAML/XML/TOML/INI/Markdown/RSS/EPUB/日志…） | json（vendored rxi/json.lua）、yaml、xml、tomlini、markdown、jsonpatch、rss、epub、zip_list（zip 清单）、unzip（deflate 解压）、id3 |
+| `libs/parser/` | **解析器**——数据结构/文本解析（JSON/JSONPath/YAML/XML/TOML/INI/Markdown/RSS/CSV/HTML/EPUB/日志…） | json（vendored rxi/json.lua）、yaml、xml、tomlini、markdown、jsonpatch、jsonpath、rss、csvdialect、htmlx、epub、zip_list（zip 清单）、unzip（deflate 解压）、id3 |
 | `libs/udf/` | **标量函数**——算法/编码/数学/字符串/网络/LLM UDF | base64、crc32、uuid、html_escape、iconv（编码检测/转码/语言检测）、cncheck（身份证/统一社会信用代码/银行卡/手机校验位）、fuzzy（相似度/距离）、tail_file（增量 tail）、qr（二维码生成）、cidr（网络 CIDR/IPv4/6）、llm_extract（LLM 结构化提取） |
 | `libs/network/` | **网络/API**——HTTP/签名/私域 API 数据源 | （规划：signed-api、http 抓取） |
 | `libs/ffi/` | **FFI 绑定**——系统 C 库（dcmtk/open62541…）/编译型求解器 | sudoku（C/Rust 版，比 Lua 参考版快 ~7×，[libs/ffi/sudoku](libs/ffi/sudoku/README_cn.md)） |
@@ -36,6 +36,9 @@ English README: [README.md](README.md)
 | `libs/parser/markdown.lua` | parser | Markdown 结构提取（自包含纯 Lua）：`toc` 标题树（含 H1–H6 级）、`links` 链接/图片（label/href/title）、`code` 代码块（语言 + 内容，抠出避免被当正文）、`lists` 列表（嵌套 + 有序/无序 + 复选框）、`quotes` 块引用、`stats` 计数、`plain` 去标签纯文本。代码块/行内 code 内的 `#` 不误判为标题 | 无 |
 | `libs/parser/jsonpatch.lua` | parser | RFC 6902 JSON Patch（`add`/`remove`/`replace`/`move`/`copy`/`test`）+ RFC 6901 JSON Pointer + 基础 `diff`（自含纯 Lua JSON 编解码）。DuckDB 有内建 `json_merge_patch`（RFC 7386）但无 RFC 6902 操作数组/JSON Pointer，本库补齐。`apply`/`get`/`set`/`test`/`diff`（diff 结果 apply 回原 doc 闭环=目标 doc） | 无 |
 | `libs/parser/rss.lua` | parser | RSS 2.0 / RSS 1.0 (RDF) / Atom 1.0 feed 规整为统一 JSON（`detect`/`feed`/`items`/`count`）：items 每条 {title,link,pubDate,description,author,content}，命名空间容忍（dc:creator/content:encoded）、CDATA/实体正确、`file` 参数读盘。DuckDB 无内建 RSS/Atom/XPath | 无 |
+| `libs/parser/jsonpath.lua` | parser | RFC 9535 JSONPath 实用子集（自含纯 Lua）：成员/数组索引(0-based/负)/通配 `*`/递归下降 `$..x`/过滤谓词 `[?(@.p op 字面量)]`（`=` `!=` `<` `<=` `>` `>=` + `and` 组合，`@.key` 存在性）。DuckDB `json_extract` 只支持简单路径，不支持通配/递归/过滤。结果按文档顺序（解码保留键序） | 无 |
+| `libs/parser/csvdialect.lua` | parser | CSV 方言探测 + 纯 Lua 状态机解析（自含）：`detect`（delimiter `,;tab|` + quote/doublequote/skipinitialspace/`has_header` 启发式）、`parse`（引号内嵌分隔符/双引号转义/多行 → 二维数组）、`rows`/`ncols`；`file` 参数读盘。DuckDB read_csv 采样嗅探对短/多行/分号文件常误判，本库确定性探测 | 无 |
+| `libs/parser/htmlx.lua` | parser | HTML→结构化抽取（自含纯 Lua）：`title`、`links`[{href,text}]、`tables`[{rows:[[cell]]}]、`text`（去标签可见纯文本）、`feed`（一次全取）；剔除 head/script/style/注释，大小写不敏感 + 未闭合容错 + void 元素，`file` 参数读盘。配 rss 做内容抽取 | 无 |
 | `libs/parser/zip_list.lua` | parser | ZIP 中央目录文件清单（文件名\|压缩方法\|压缩大小\|原始大小\|CRC32），无需解压 | 无 |
 | `libs/parser/unzip.lua` | parser | ZIP 解压指定文件（FFI 调 zlib raw inflate，windowBits=-15）——OFD/EPUB/DOCX/xlsx 等 zip 容器读取第一步；中央目录提供原始大小 → 一次分配输出缓冲 | zlib（Linux/macOS 内置；Windows zlib1.dll） |
 | `libs/parser/epub.lua` | parser | EPUB 电子书解析（自包含，内嵌 zip 中央目录 + raw inflate，逐字移植自 unzip.lua）：`metadata`（title/creators/language/identifier/publisher/date/version/cover_href，命名空间容忍抽 OPF）、`toc`（EPUB2 NCX navPoint / EPUB3 nav type=toc → [{play_order,label,href}]）、`text`（指定 href 章节去标签纯文本，剥离 head/script/style）、`info`（opf_path/version/doc_count）。container.xml 自动定位 OPF | zlib（读文件需普通模式） |

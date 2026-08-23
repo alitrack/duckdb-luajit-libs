@@ -14,8 +14,8 @@ English README: [README.md](README.md)
 | `libs/datasource/` | **数据源**——读文件/目录/格式，补 DuckDB 读不了的数据 | dicom（医疗影像）、dirscan（目录元数据）、inv_ofd（数电发票 OFD 解析）、tdx（通达信行情数据） |
 | `libs/export/` | **导出**——存储过程式 COPY 导出（query/表 → parquet/csv/json） | export（Lua 里一条 COPY TO） |
 | `libs/etl/` | **ETL 流程层**——审计日志、幂等加载校验、错误自愈、SQL 组件化、增量加载、缓慢变化维度 | etl（audit/validate/safe/q）、incremental、scd2 |
-| `libs/parser/` | **解析器**——数据结构/文本解析（JSON/YAML/XML/TOML/INI/Markdown/EPUB/日志…） | json（vendored rxi/json.lua）、yaml、xml、tomlini、markdown、epub、zip_list（zip 清单）、unzip（deflate 解压）、id3 |
-| `libs/udf/` | **标量函数**——算法/编码/数学/字符串/LLM UDF | base64、crc32、uuid、html_escape、iconv（编码检测/转码/语言检测）、cncheck（身份证/统一社会信用代码/银行卡/手机校验位）、fuzzy（相似度/距离）、tail_file（增量 tail）、qr（二维码生成）、llm_extract（LLM 结构化提取） |
+| `libs/parser/` | **解析器**——数据结构/文本解析（JSON/YAML/XML/TOML/INI/Markdown/RSS/EPUB/日志…） | json（vendored rxi/json.lua）、yaml、xml、tomlini、markdown、jsonpatch、rss、epub、zip_list（zip 清单）、unzip（deflate 解压）、id3 |
+| `libs/udf/` | **标量函数**——算法/编码/数学/字符串/网络/LLM UDF | base64、crc32、uuid、html_escape、iconv（编码检测/转码/语言检测）、cncheck（身份证/统一社会信用代码/银行卡/手机校验位）、fuzzy（相似度/距离）、tail_file（增量 tail）、qr（二维码生成）、cidr（网络 CIDR/IPv4/6）、llm_extract（LLM 结构化提取） |
 | `libs/network/` | **网络/API**——HTTP/签名/私域 API 数据源 | （规划：signed-api、http 抓取） |
 | `libs/ffi/` | **FFI 绑定**——系统 C 库（dcmtk/open62541…）/编译型求解器 | sudoku（C/Rust 版，比 Lua 参考版快 ~7×，[libs/ffi/sudoku](libs/ffi/sudoku/README_cn.md)） |
 | `libs/mcp/` | **MCP 集成**——DuckDB 作为 MCP server，把 Lua UDF 发布成 tools 给 AI 助手调用 | mcp-server（sudoku_solve 示例） |
@@ -34,6 +34,8 @@ English README: [README.md](README.md)
 | `libs/parser/tomlini.lua` | parser | TOML + INI 配置解析→JSON（自包含纯 Lua）：TOML 分组/`[a.b]` 嵌套/点路径 key/行内表 `{}`/行内数组/多行字符串/单引号字面量/注释；INI 分组/`[=:]` 赋值/`;`与`#` 注释/类型嗅探。`op=toml` 或 `op=ini` → JSON，配 `json_extract` 抽取。诚实边界：无 date-time 专门类型/数组表 `[[..]]`/多文档 | 无 |
 | `libs/parser/id3.lua` | parser | MP3 ID3v2 标签解析（TIT2/TPE1/TALB/TYER/TRCK/TCON；ISO-8859-1/UTF-16/UTF-8）——表模式：文件列表 → 扁平行 | 无 |
 | `libs/parser/markdown.lua` | parser | Markdown 结构提取（自包含纯 Lua）：`toc` 标题树（含 H1–H6 级）、`links` 链接/图片（label/href/title）、`code` 代码块（语言 + 内容，抠出避免被当正文）、`lists` 列表（嵌套 + 有序/无序 + 复选框）、`quotes` 块引用、`stats` 计数、`plain` 去标签纯文本。代码块/行内 code 内的 `#` 不误判为标题 | 无 |
+| `libs/parser/jsonpatch.lua` | parser | RFC 6902 JSON Patch（`add`/`remove`/`replace`/`move`/`copy`/`test`）+ RFC 6901 JSON Pointer + 基础 `diff`（自含纯 Lua JSON 编解码）。DuckDB 有内建 `json_merge_patch`（RFC 7386）但无 RFC 6902 操作数组/JSON Pointer，本库补齐。`apply`/`get`/`set`/`test`/`diff`（diff 结果 apply 回原 doc 闭环=目标 doc） | 无 |
+| `libs/parser/rss.lua` | parser | RSS 2.0 / RSS 1.0 (RDF) / Atom 1.0 feed 规整为统一 JSON（`detect`/`feed`/`items`/`count`）：items 每条 {title,link,pubDate,description,author,content}，命名空间容忍（dc:creator/content:encoded）、CDATA/实体正确、`file` 参数读盘。DuckDB 无内建 RSS/Atom/XPath | 无 |
 | `libs/parser/zip_list.lua` | parser | ZIP 中央目录文件清单（文件名\|压缩方法\|压缩大小\|原始大小\|CRC32），无需解压 | 无 |
 | `libs/parser/unzip.lua` | parser | ZIP 解压指定文件（FFI 调 zlib raw inflate，windowBits=-15）——OFD/EPUB/DOCX/xlsx 等 zip 容器读取第一步；中央目录提供原始大小 → 一次分配输出缓冲 | zlib（Linux/macOS 内置；Windows zlib1.dll） |
 | `libs/parser/epub.lua` | parser | EPUB 电子书解析（自包含，内嵌 zip 中央目录 + raw inflate，逐字移植自 unzip.lua）：`metadata`（title/creators/language/identifier/publisher/date/version/cover_href，命名空间容忍抽 OPF）、`toc`（EPUB2 NCX navPoint / EPUB3 nav type=toc → [{play_order,label,href}]）、`text`（指定 href 章节去标签纯文本，剥离 head/script/style）、`info`（opf_path/version/doc_count）。container.xml 自动定位 OPF | zlib（读文件需普通模式） |
@@ -48,6 +50,7 @@ English README: [README.md](README.md)
 | `libs/udf/fuzzy.lua` | udf | 字符串相似度/距离（纯 Lua，**UTF-8 代码点感知**）：`lev` 编辑距离、`normlev` 归一化、`jaro`/`jw` Jaro-Winkler、`sim` 选指标、`simrank` 候选列表打分降序（记录链接/姓名匹配/去重核心）。中文按 1 个代码点处理（避免字节级退化：王小明 vs 王小民 字节级 jw=1.0，代码点级=0.8889）；JW 前缀上限 4（经典） | 无 |
 | `libs/udf/tail_file.lua` | udf | 增量日志/文件 tail（纯 Lua，无状态偏移状态机）：`tail` 从上次字节偏移续读新增行 → `{offset,count,lines}`（未完结行暂吐、下次补全；文件截断/重建自动重置 offset；`max` 限制条数）。DuckDB 无内建增量读，配合应用存回的 offset 做轮询消费 | 无（读文件需普通模式） |
 | `libs/udf/qr.lua` | udf | QR 码生成（纯 Lua，自包含，无 FFI）：`matrix`（模块二维数组 1=黑）、`svg`（可扫 SVG）、`ascii`（终端预览）、`info`（version/size/ec/mask）、`codewords`（数据+Reed-Solomon 码字 hex）。Byte 模式（任意 UTF-8）、EC 级别 L/M/Q/H、自动选 mask（penalty 最小）。**正确性经 python-qrcode 独立实现交叉校验：codewords 逐字节 IDENTICAL**（见 qr_verify.py） | 无 |
+| `libs/udf/cidr.lua` | udf | 网络 CIDR / IP 工具（纯 Lua，自包含）：`version`/`ip2int`/`int2ip`/`in_cidr`（成员判定）/`cidr_info`（network/broadcast/prefix/size/mask）/`classify`（public/private/loopback/link-local/multicast…）/`net`/`broadcast`。IPv4(32 位)+IPv6(128 位按 8×16 位 hextet)。DuckDB 无内建 CIDR/IPv4/IPv6 函数。**正确性经 Python ipaddress 独立交叉校验 140/141**（唯一差异=Python 对 1:2:3:4:5:6:7:8 的 is_reserved 误判） | 无 |
 | `libs/mcp/` (mcp-server.sql + sudoku.lua) | mcp | DuckDB 作为 MCP server 暴露 Lua UDF 给 AI（duckdb_mcp + luajit 合体） | duckdb_mcp 扩展 |
 | `libs/mcp/sudoku.lua` | mcp | 数独求解器（81 位题面 → 解，锚点验证）——模块表库：install 后 compile 包装成 UDF | 无 |
 | `libs/ffi/sudoku/` (sudoku_solve.c/.rs + README) | ffi | 同求解器的 C/Rust 版，LuaJIT FFI（`ffi.load`）调用，比 Lua 参考版快 ~7×——源码非 INDEX 可装库；编译 .so 后按路径加载 | gcc/rustc（构建时） |

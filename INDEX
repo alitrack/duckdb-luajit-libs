@@ -12,6 +12,7 @@ rss|libs/parser/rss.lua
 jsonpath|libs/parser/jsonpath.lua
 csvdialect|libs/parser/csvdialect.lua
 htmlx|libs/parser/htmlx.lua
+pinyin|libs/udf/pinyin.lua
 init|libs/tooling/init.lua
 base64|libs/udf/base64.lua
 crc32|libs/udf/crc32.lua

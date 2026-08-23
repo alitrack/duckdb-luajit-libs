@@ -21,6 +21,7 @@ cncheck|libs/udf/cncheck.lua
 fuzzy|libs/udf/fuzzy.lua
 tail_file|libs/udf/tail_file.lua
 qr|libs/udf/qr.lua
+cidr|libs/udf/cidr.lua
 unzip|libs/parser/unzip.lua
 epub|libs/parser/epub.lua
 inv_ofd|libs/datasource/inv_ofd.lua

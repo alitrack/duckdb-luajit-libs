@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0">
+  <channel>
+    <title>DuckDB News</title>
+    <link>https://example.com</link>
+    <description>Latest posts</description>
+    <lastBuildDate>Mon, 23 Aug 2026 10:00:00 GMT</lastBuildDate>
+    <item>
+      <title>First Post &amp; More</title>
+      <link>https://example.com/p1</link>
+      <guid isPermaLink="false">p1</guid>
+      <pubDate>Sun, 22 Aug 2026 08:00:00 GMT</pubDate>
+      <description><![CDATA[Hello <b>world</b> &amp; friends]]></description>
+      <author>alice@example.com (Alice)</author>
+      <content:encoded><![CDATA[<p>Full body of post one.</p>]]></content:encoded>
+    </item>
+    <item>
+      <title>Second Post</title>
+      <link>https://example.com/p2</link>
+      <pubDate>Sat, 21 Aug 2026 09:30:00 GMT</pubDate>
+      <description>Short desc</description>
+      <dc:creator>Bob</dc:creator>
+    </item>
+  </channel>
+</rss>

@@ -109,7 +109,7 @@ end
 -- JSON 编码
 -- ======================================================================
 local function json_escape(s)
-  return (s:gsub('%[\\%"]', function(c)
+  return (tostring(s):gsub('([\\\"\n\t\r])', function(c)
     if c == '\\' then return '\\\\' elseif c == '"' then return '\\"'
     elseif c == '\n' then return '\\n' elseif c == '\t' then return '\\t'
     elseif c == '\r' then return '\\r' else return c end

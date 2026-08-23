@@ -10,6 +10,7 @@ markdown|libs/parser/markdown.lua
 jsonpatch|libs/parser/jsonpatch.lua
 rss|libs/parser/rss.lua
 jsonpath|libs/parser/jsonpath.lua
+csvdialect|libs/parser/csvdialect.lua
 base64|libs/udf/base64.lua
 crc32|libs/udf/crc32.lua
 uuid|libs/udf/uuid.lua

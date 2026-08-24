@@ -67,7 +67,7 @@ English README: [README.md](README.md)
 | `libs/etl/etl.lua` | etl | ETL 流程层：审计日志（`etl.log`/`etl.run`）、幂等加载校验（`etl.validate`）、错误自愈（`etl.safe`/`etl.insert_auto`）、SQL 组件化（`etl.q`/`etl.query`）——需普通模式（非 trusted）用 `_duckdb_call`/`_duckdb_query` | 无 |
 | `libs/etl/incremental.lua` | incremental | 增量加载：水位游标（`etl_watermark` 表），`ts`/`id`/`ts_id` 三种游标模式，只加载新行，返回 JSON（`loaded`/`last_ts`/`last_id`）——需普通模式 | 无 |
 | `libs/etl/scd2.lua` | scd2 | 缓慢变化维度类型 2：属性指纹（md5）对比，自动建表（`_valid_from`/`_valid_to`/`_is_current`/`_version`），关闭旧版本 + 插入新版本，幂等——需普通模式 | 无 |
-| `libs/datasource/tdx.lua` | datasource | 通达信（TDX）股票行情数据：.lc1/.lc5/.day 格式解析，32字节/记录，小端序。**错误可见化**：路径错/文件缺失/扩展名非 .lc1/.lc5/.day/大小非 32 倍数 → 一行 `ERR: <原因> @ <path>`（字段2-7 为 0，`::FLOAT` 可转）+ 全部失败时首行 `0/N files parsed` 汇总，聚合得 NULL 时 select * 即可看到原因。**WSL**：路径用 `/mnt/d/...`（正斜杠），不能用 `D:\...`。**需 `set threads=1`**（扩展并行表函数 init_data 竞态在默认多线程下返回 0 行） | 无（ffi） |
+| `libs/datasource/tdx.lua` | datasource | 通达信（TDX）股票行情数据：.lc1/.lc5/.day 格式解析，32字节/记录，小端序。**错误可见化**：路径错/文件缺失/扩展名非 .lc1/.lc5/.day/大小非 32 倍数 → 一行 `ERR: <原因> @ <path>`（字段2-7 为 0，`::FLOAT` 可转）+ 全部失败时首行 `0/N files parsed` 汇总，聚合得 NULL 时 select * 即可看到原因。**WSL**：路径用 `/mnt/d/...`（正斜杠），不能用 `D:\...`。**说明**：扩展表函数曾有一个并行 0 行 bug（按名调用只在注册线程的 TLS Lua state 里解析到 lib，worker 线程拿不到 global 就误把名字当 inline source 编译成 nil → 0 行）——**已在 C 扩展修复**（tbt_init 现在会回退到共享源表）。若在用未修复的旧扩展二进制，可 `set threads=1;` 绕过（只是掩盖 bug，不是修复） | 无（ffi） |
 
 ### 增量加载 × DuckLake 数据湖（实测组合）
 

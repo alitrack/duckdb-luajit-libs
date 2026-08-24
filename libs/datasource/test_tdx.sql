@@ -1,8 +1,10 @@
 -- tdx.lua 回归（duckdb-luajit）：日线/分钟线解析 + 错误可见化（ERR 行）
 -- 先跑 make_tdx_fixture.py 生成 fixture_*.{day,lc5,bin}
--- ⚠️ 必须 set threads=1：duckdb-luajit 扩展的并行表函数在默认多线程下会因
---    共享 init_data 竞态返回 0 行（预存 bug，threads=1 稳定）。
-set threads=1;
+-- ⚠️ 本回归用 DEFAULT 多线程跑（不设 threads=1）：这是用户真实场景，也是
+--    之前 0 行 bug 的触发路径。C 扩展已在 tbt_init 修复（按名调用在并行
+--    worker 线程拿不到 TLS global → 误把名字当 inline source 编译成 nil），
+--    修复后默认线程稳定。若用未修复的旧扩展二进制跑，可临时加 set threads=1;
+--    绕过（但那是掩盖 bug，不是修复）。
 LOAD '/mnt/d/wsl2/luajit/build/release/luajit.duckdb_extension';
 SELECT * FROM luajit_module(mode := 'quick_compile', sql_name := 'tdx',
   source := 'return dofile(''/mnt/d/wsl2/duckdb-luajit-libs/libs/datasource/tdx.lua'')');

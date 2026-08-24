@@ -66,7 +66,7 @@ Works with [duckdb-luajit](https://github.com/alitrack/duckdb-luajit). Formats D
 | `libs/linalg/linalg.lua` | linalg | Linear algebra via LuaJIT FFI → system LAPACK/OpenBLAS (40-yr industry standard, same kernels as MATLAB/R/numpy) — `matmul`/`svd`/`eigh`/`inv`/`lu`/`chol`/`qr`/`norm`, flat row-major `DOUBLE[]`+m/n in → flat out; 10 anchored cases incl. 3×2 SVD (U·Σ·Vᵀ=A) | libopenblas.so (system, `LUALINALG_LIB` to override) |
 | `libs/ffi/sudoku/` (sudoku_solve.c/.rs + README) | ffi | Same solver in C/Rust via LuaJIT FFI (`ffi.load`), ~7× faster than Lua reference — source, not INDEX-installable; compile `.so` then load by path | gcc/rustc (build-time) |
 | `libs/etl/etl.lua` | etl | ETL flow layer: audit log (`etl.log`/`etl.run`), idempotent load validation (`etl.validate`), error self-healing (`etl.safe`/`etl.insert_auto`), componentized SQL (`etl.q`/`etl.query`) — needs normal mode (non-trusted) for `_duckdb_call`/`_duckdb_query` | none |
-| `libs/datasource/tdx.lua` | datasource | TDX (通达信) stock market data: .lc1/.lc5/.day format parser, 32-byte/record, little-endian | none (ffi) |
+| `libs/datasource/tdx.lua` | datasource | TDX (通达信) stock market data: .lc1/.lc5/.day format parser, 32-byte/record, little-endian. **Error-visible**: a bad path / missing file / wrong extension / non-32-multiple size yields a visible `ERR: <reason> @ <path>` row (fields 2-7 numeric, `::FLOAT`-safe) plus a `0/N files parsed` summary when all fail — so a `NULL` aggregate is never mistaken for "no data". **WSL**: pass `/mnt/d/...` (forward slash), not `D:\...`. **Run with `set threads=1`** (parallel table-fn init_data race in the ext returns 0 rows otherwise) | none (ffi) |
 
 ## One-SQL Install Protocol (v0.31+ recommended: `install` / `list_remote`)
 

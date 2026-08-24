@@ -4,11 +4,11 @@ LOAD '/mnt/d/wsl2/luajit/build/release/luajit.duckdb_extension';
 SELECT * FROM luajit_module(mode := 'quick_compile', sql_name := 'init',
   source := 'return dofile(''/mnt/d/wsl2/duckdb-luajit-libs/libs/tooling/init.lua'')');
 
--- 1. list：列出全部库名 + 总数（INDEX 当前 39 库）
+-- 1. list：列出全部库名 + 总数（INDEX 当前 40 库）
 SELECT json_extract(init({root:'/mnt/d/wsl2/duckdb-luajit-libs'}), '$.total') AS total,
        json_extract(init({root:'/mnt/d/wsl2/duckdb-luajit-libs'}), '$.names[0]') AS first,
        json_contains(init({root:'/mnt/d/wsl2/duckdb-luajit-libs'}), '"jsonpath"') AS has_jp;
--- 39 | "dicom" | true
+-- 40 | "dicom" | true
 
 -- 2. names：子集过滤 + 未知库 → missing
 SELECT init({root:'/mnt/d/wsl2/duckdb-luajit-libs', op:'names', names:['jsonpath','cidr','nope_lib']}) AS n2;

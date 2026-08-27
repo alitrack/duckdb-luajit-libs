@@ -22,7 +22,7 @@ English README: [README.md](README.md)
 | `libs/udf/` | **标量函数**——算法/编码/数学/字符串/网络/LLM UDF | base64、crc32、uuid、html_escape、iconv（编码检测/转码/语言检测）、cncheck（身份证/统一社会信用代码/银行卡/手机校验位 + 15→18 位转换）、fuzzy（相似度/距离）、tail_file（增量 tail）、qr（二维码生成）、cidr（网络 CIDR/IPv4/6）、pinyin（中文→拼音，pypinyin 词典 vendored）、llm_extract（LLM 结构化提取） |
 | `libs/tooling/` | **工具**——仓库自维护/批量操作 | init（从 INDEX 批量 dofile+注册全部/指定库，离线可用） |
 | `libs/network/` | **网络/API**——HTTP/签名/私域 API 数据源 | （规划：signed-api、http 抓取） |
-| `libs/ffi/` | **FFI 绑定**——系统 C 库（dcmtk/open62541…）/编译型求解器 | sudoku（C/Rust 版，比 Lua 参考版快 ~7×，[libs/ffi/sudoku](libs/ffi/sudoku/README_cn.md)） |
+| `libs/ffi/` | **FFI 绑定**——系统 C 库（dcmtk/open62541…）/编译型求解器；**资源生命周期规范**（[README_cn.md](libs/ffi/README_cn.md) 三条铁律 + 已实测坑清单 + [TEMPLATE.lua](libs/ffi/TEMPLATE.lua) 可复制骨架：ffi.gc 创建即绑定/释放顺序/JSON 返回约定；[README.md](libs/ffi/README.md) 英文精简版） | sudoku（C/Rust 版，比 Lua 参考版快 ~7×，[libs/ffi/sudoku](libs/ffi/sudoku/README_cn.md)） |
 | `libs/mcp/` | **MCP 集成**——DuckDB 作为 MCP server，把 Lua UDF 发布成 tools 给 AI 助手调用 | mcp-server（sudoku_solve 示例） |
 
 ## 库索引

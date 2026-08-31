@@ -38,3 +38,4 @@ highs|libs/optimize/highs.lua
 linalg|libs/linalg/linalg.lua
 rng|libs/stats/rng.lua
 tdx|libs/datasource/tdx.lua
+rbac|libs/security/rbac.lua

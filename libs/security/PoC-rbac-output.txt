@@ -1,0 +1,29 @@
+# PoC: rbac.lua (Quack RBAC policy engine)
+# Date: 2026-08-31T01:26:44Z
+# duckdb: 1.5.5
+# luajit ext: /mnt/d/wsl2/luajit/build/release/luajit.duckdb_extension
+# lib: libs/security/rbac.lua (D:\wsl2\duckdb-luajit-libs)
+# cmd: /tmp/dbenv/bin/python client.py; /tmp/dbenv/bin/python bypass2.py
+
+## 功能测试 (alice=analyst 全读, bob=viewer 只读 public_data)
+[PASS] alice SELECT public_data (quack_query): rows=[(1, 'open'), (2, 'public')]
+[PASS] alice SELECT secret_data (quack_query): rows=[(1, 'classified'), (2, 'top-secret')]
+[PASS] bob SELECT public_data (quack_query): rows=[(1, 'open'), (2, 'public')]
+[DENY] bob SELECT secret_data (quack_query): Invalid Input Error: Authorization failed
+[PASS] alice SELECT public_data (ATTACH): rows=[(1, 'open'), (2, 'public')]
+[DENY] bob SELECT secret_data (ATTACH): Invalid Input Error: Authorization failed
+[DENY] bob SET GLOBAL quack_authorization_function=nop (quack_query): Invalid Input Error: Authorization failed
+[DENY] bob retry secret_data after SET (quack_query): Invalid Input Error: Authorization failed
+[DENY] evil SELECT (unknown token): Invalid Input Error: Authentication failed
+[DENY] bob INSERT INTO public_data: Invalid Input Error: Authorization failed
+
+## 绕过测试 (加固白名单策略)
+[DENY] B0 baseline bob secret_data (expect DENY): Invalid Input Error: Authorization failed
+[DENY] B1 bob INSERT INTO user_roles (self-grant analyst): Invalid Input Error: Authorization failed
+[DENY] B1b bob secret_data after self-grant (expect PASS if B1 worked): Invalid Input Error: Authorization failed
+[DENY] B2 bob UPDATE role_perms viewer->secret_data=true: Invalid Input Error: Authorization failed
+[DENY] B2b bob secret_data after perm tamper: Invalid Input Error: Authorization failed
+[DENY] B3 bob CREATE OR REPLACE MACRO rbac_authz: Invalid Input Error: Authorization failed
+[DENY] B3b bob secret_data after macro takeover: Invalid Input Error: Authorization failed
+[DENY] B4 bob SET GLOBAL quack_authentication_function=developer_mode_auth: Invalid Input Error: Authorization failed
+[DENY] B4b evil connects after authn swap (expect PASS): Invalid Input Error: Authentication failed

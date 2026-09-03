@@ -39,3 +39,6 @@ linalg|libs/linalg/linalg.lua
 rng|libs/stats/rng.lua
 tdx|libs/datasource/tdx.lua
 rbac|libs/security/rbac.lua
+psi|libs/quality/psi.lua
+entity|libs/entity/entity.lua
+privacy|libs/privacy/privacy.lua

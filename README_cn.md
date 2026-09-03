@@ -7,7 +7,7 @@ DuckDB 的 Lua 库仓库：**一条 SQL 从仓库加载函数/表函数**，无�
 
 English README: [README.md](README.md)
 
-> **规模（2026-08）**：40 个库，手写 Lua 逻辑 ≈ **1.16 万行**（另含 pinyin 内嵌
+> **规模（2026-08）**：43 个库，手写 Lua 逻辑 ≈ **1.16 万行**（另含 pinyin 内嵌
 > vendored 词典 17.8 万行数据）；配套测试 SQL 1454 行 + 独立 oracle 交叉校验脚本
 > 132 行。每个库"真实编译跑通 + 实测输出 + 独立交叉校验 + PoC 证据"。
 
@@ -24,6 +24,9 @@ English README: [README.md](README.md)
 | `libs/network/` | **网络/API**——HTTP/签名/私域 API 数据源 | （规划：signed-api、http 抓取） |
 | `libs/ffi/` | **FFI 绑定**——系统 C 库（dcmtk/open62541…）/编译型求解器；**资源生命周期规范**（[README_cn.md](libs/ffi/README_cn.md) 三条铁律 + 已实测坑清单 + [TEMPLATE.lua](libs/ffi/TEMPLATE.lua) 可复制骨架：ffi.gc 创建即绑定/释放顺序/JSON 返回约定；[README.md](libs/ffi/README.md) 英文精简版） | sudoku（C/Rust 版，比 Lua 参考版快 ~7×，[libs/ffi/sudoku](libs/ffi/sudoku/README_cn.md)） |
 | `libs/mcp/` | **MCP 集成**——DuckDB 作为 MCP server，把 Lua UDF 发布成 tools 给 AI 助手调用 | mcp-server（sudoku_solve 示例） |
+| `libs/quality/` | **数据质量**——分布/漂移检测 | psi（PSI/KL/卡方，画像+漂移） |
+| `libs/entity/` | **实体解析**——记录链接管道 | entity（blocking+相似度+连通分量聚类） |
+| `libs/privacy/` | **隐私工程**——差分隐私/脱敏/k-匿名 | privacy（dp_count/dp_sum/dp_mean、mask、kanon） |
 
 ## 库索引
 
@@ -67,7 +70,10 @@ English README: [README.md](README.md)
 | `libs/etl/etl.lua` | etl | ETL 流程层：审计日志（`etl.log`/`etl.run`）、幂等加载校验（`etl.validate`）、错误自愈（`etl.safe`/`etl.insert_auto`）、SQL 组件化（`etl.q`/`etl.query`）——需普通模式（非 trusted）用 `_duckdb_call`/`_duckdb_query` | 无 |
 | `libs/etl/incremental.lua` | incremental | 增量加载：水位游标（`etl_watermark` 表），`ts`/`id`/`ts_id` 三种游标模式，只加载新行，返回 JSON（`loaded`/`last_ts`/`last_id`）——需普通模式 | 无 |
 | `libs/etl/scd2.lua` | scd2 | 缓慢变化维度类型 2：属性指纹（md5）对比，自动建表（`_valid_from`/`_valid_to`/`_is_current`/`_version`），关闭旧版本 + 插入新版本，幂等——需普通模式 | 无 |
-| `libs/datasource/tdx.lua` | datasource | 通达信（TDX）股票行情数据：.lc1/.lc5/.day 格式解析，32字节/记录，小端序。**错误可见化**：路径错/文件缺失/扩展名非 .lc1/.lc5/.day/大小非 32 倍数 → 一行 `ERR: <原因> @ <path>`（字段2-7 为 0，`::FLOAT` 可转）+ 全部失败时首行 `0/N files parsed` 汇总，聚合得 NULL 时 select * 即可看到原因。**WSL**：路径用 `/mnt/d/...`（正斜杠），不能用 `D:\...`。**说明**：扩展表函数曾有一个并行 0 行 bug（按名调用只在注册线程的 TLS Lua state 里解析到 lib，worker 线程拿不到 global 就误把名字当 inline source 编译成 nil → 0 行）——**已在 C 扩展修复**（tbt_init 现在会回退到共享源表）。若在用未修复的旧扩展二进制，可 `set threads=1;` 绕过（只是掩盖 bug，不是修复） | 无（ffi） |
+| `libs/datasource/tdx.lua` | datasource | 通达信（TDX）股票行情数据：.lc1/.lc5/.day 格式解析，32字节/记录，小端序。**错误可见化**：路径错/文件缺失/扩展名非 .lc1/.lc5/.day/大小非 32 倍数 → 一行 `ERR: <原因> @ <path>`（字段2-7 为 0，`::FLOAT` 可转）+ 全部失败时首行 `0/N files parsed` 汇总，聚合得 NULL 时 select * 即可看到原因。**WSL**：路径用 `/mnt/d/...`（正斜杠），不能用 `D:\\...`。**说明**：扩展表函数曾有一个并行 0 行 bug（按名调用只在注册线程的 TLS Lua state 里解析到 lib，worker 线程拿不到 global 就误把名字当 inline source 编译成 nil → 0 行）——**已在 C 扩展修复**（tbt_init 现在会回退到共享源表）。若在用未修复的旧扩展二进制，可 `set threads=1;` 绕过（只是掩盖 bug，不是修复） | 无（ffi） |
+| `libs/quality/psi.lua` | quality | 数据漂移检测（纯 Lua 自包含）：`psi`（Population Stability Index，占比/自动分箱/显式边界三模式）、`kl`（KL 散度 nats）、`chi2`、`report`（{psi,kl,chi2,verdict,bins,n} JSON，verdict=no/moderate/significant-drift 阈值 0.1/0.25）。空箱 0.0001 钳制（业界惯例）；常量列/单值分布兜底为 0。配 dq/etl.validate 做质量门禁 | 无 |
+| `libs/entity/entity.lua` | entity | 实体解析管道（纯 Lua 自包含，UTF-8 代码点级）：`block`（soundex/first3/ngram/norm 四类 blocking 键，中英文通用）、`match`（Jaro-Winkler p=0.25 与 fuzzy lib 同口径、jaro、lev）、`resolve`（blocking → 多字段加权打分 → 超阈值连边 → union-find 连通分量 → canonical；records 表模式 Lua 直调 / 并行数组模式 SQL 侧传多列 LIST——扩展 LIST-of-STRUCT 桥接暂未支持）。诚实边界：soundex 仅英文；blocking 漏键即漏配对，生产多键并联；全内存实现万级以内 | 无 |
+| `libs/privacy/privacy.lua` | privacy | 隐私工程原语（纯 Lua 自包含）：`dp_count`/`dp_sum`/`dp_mean`（ε-差分隐私，Laplace 机制，顺序组合线性预算；Park-Miller LCG Schrage 法——double 精确无 2^53 溢出，seed 可复现）、`laplace`（机制暴露）、`mask`（hash 盐化 FNV-1a(mul32 精确回绕)/star/bin 泛化/suppress/rand 确定性替换）、`kanon`（k-匿名 Mondrian 简化：等权范围分裂 + 区间/前缀泛化，l-diversity 未实现诚实标注） | 无 |
 
 ### 增量加载 × DuckLake 数据湖（实测组合）
 
@@ -100,7 +106,7 @@ LOAD 'luajit';
 
 -- 0. 看仓库里有哪些库（INDEX 协议，自动缓存）
 SELECT * FROM luajit_module(mode := 'list_remote');
--- → available libs: dicom / dirscan / export / json / base64 / crc32 / uuid / html_escape / iconv / llm_extract / zip_list / unzip / inv_ofd / incremental / scd2 / tdx
+-- → available libs: dicom / dirscan / export / json / base64 / crc32 / uuid / html_escape / iconv / llm_extract / zip_list / unzip / inv_ofd / incremental / scd2 / tdx / psi / entity / privacy
 
 -- 1. 一条 SQL 装库并注册（标量 UDF 直接可调用）
 SELECT * FROM luajit_module(mode := 'install', sql_name := 'base64');

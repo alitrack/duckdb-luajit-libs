@@ -6,7 +6,7 @@ Works with [duckdb-luajit](https://github.com/alitrack/duckdb-luajit). Formats D
 
 中文版说明见 [README_cn.md](README_cn.md).
 
-> **Size (2026-08)**: 40 libraries, ~**11.6k hand-written Lua logic lines** (plus a
+> **Size (2026-08)**: 43 libraries, ~**11.6k hand-written Lua logic lines** (plus a
 > 178k-line vendored pinyin dictionary embedded in `pinyin.lua`); +1454 lines of test SQL
 > and 132 lines of independent oracle cross-check scripts. Every lib: real compile +
 > measured output + independent cross-check + PoC evidence.
@@ -26,6 +26,9 @@ Works with [duckdb-luajit](https://github.com/alitrack/duckdb-luajit). Formats D
 | `libs/linalg/` | **Linear algebra** — matmul/SVD/eigh/inv/LU/chol/QR (LAPACK/OpenBLAS via FFI) | linalg |
 | `libs/ffi/` | **FFI bindings** — system C libraries (dcmtk/open62541…) / compiled solvers | sudoku (C/Rust solver, ~7× faster than Lua reference, [libs/ffi/sudoku](libs/ffi/sudoku/README.md)) |
 | `libs/mcp/` | **MCP integration** — DuckDB as MCP server exposing Lua UDFs as tools to AI assistants | mcp-server (sudoku_solve demo) |
+| `libs/quality/` | **Data quality** — distribution/drift detection | psi (PSI/KL/chi2, profiling+drift) |
+| `libs/entity/` | **Entity resolution** — record linkage pipeline | entity (blocking+scoring+connected-component clustering) |
+| `libs/privacy/` | **Privacy engineering** — differential privacy/masking/k-anonymity | privacy (dp_count/dp_sum/dp_mean, mask, kanon) |
 
 ## Library Index
 
@@ -66,7 +69,10 @@ Works with [duckdb-luajit](https://github.com/alitrack/duckdb-luajit). Formats D
 | `libs/linalg/linalg.lua` | linalg | Linear algebra via LuaJIT FFI → system LAPACK/OpenBLAS (40-yr industry standard, same kernels as MATLAB/R/numpy) — `matmul`/`svd`/`eigh`/`inv`/`lu`/`chol`/`qr`/`norm`, flat row-major `DOUBLE[]`+m/n in → flat out; 10 anchored cases incl. 3×2 SVD (U·Σ·Vᵀ=A) | libopenblas.so (system, `LUALINALG_LIB` to override) |
 | `libs/ffi/sudoku/` (sudoku_solve.c/.rs + README) | ffi | Same solver in C/Rust via LuaJIT FFI (`ffi.load`), ~7× faster than Lua reference — source, not INDEX-installable; compile `.so` then load by path | gcc/rustc (build-time) |
 | `libs/etl/etl.lua` | etl | ETL flow layer: audit log (`etl.log`/`etl.run`), idempotent load validation (`etl.validate`), error self-healing (`etl.safe`/`etl.insert_auto`), componentized SQL (`etl.q`/`etl.query`) — needs normal mode (non-trusted) for `_duckdb_call`/`_duckdb_query` | none |
-| `libs/datasource/tdx.lua` | datasource | TDX (通达信) stock market data: .lc1/.lc5/.day format parser, 32-byte/record, little-endian. **Error-visible**: a bad path / missing file / wrong extension / non-32-multiple size yields a visible `ERR: <reason> @ <path>` row (fields 2-7 numeric, `::FLOAT`-safe) plus a `0/N files parsed` summary when all fail — so a `NULL` aggregate is never mistaken for "no data". **WSL**: pass `/mnt/d/...` (forward slash), not `D:\...`. **Note**: the extension's table function had a parallel 0-rows bug (by-name call resolved the lib only in the registering thread's TLS Lua state; on a worker thread it mis-compiled the name as source → nil → 0 rows) — **fixed in the C extension** (tbt_init now falls back to the shared source table). If running an older unfixed extension binary, `set threads=1;` masks it (workaround, not a fix) | none (ffi) |
+| `libs/datasource/tdx.lua` | datasource | TDX (通达信) stock market data: .lc1/.lc5/.day format parser, 32-byte/record, little-endian. **Error-visible**: a bad path / missing file / wrong extension / non-32-multiple size yields a visible `ERR: <reason> @ <path>` row (fields 2-7 numeric, `::FLOAT`-safe) plus a `0/N files parsed` summary when all fail — so a `NULL` aggregate is never mistaken for "no data". **WSL**: pass `/mnt/d/...` (forward slash), not `D:\\...`. **Note**: the extension's table function had a parallel 0-rows bug (by-name call resolved the lib only in the registering thread's TLS Lua state; on a worker thread it mis-compiled the name as source → nil → 0 rows) — **fixed in the C extension** (tbt_init now falls back to the shared source table). If running an older unfixed extension binary, `set threads=1;` masks it (workaround, not a fix) | none (ffi) |
+| `libs/quality/psi.lua` | quality | Data drift detection (pure Lua, self-contained): `psi` (Population Stability Index — share arrays / auto-binning / explicit breaks), `kl` (KL divergence, nats), `chi2`, `report` ({psi,kl,chi2,verdict,bins,n} JSON, verdict thresholds 0.1/0.25). Empty bins clamped to 0.0001 (industry convention); constant/single-value columns → 0. Pair with dq/etl.validate for quality gates | none |
+| `libs/entity/entity.lua` | entity | Entity resolution pipeline (pure Lua, self-contained, UTF-8 codepoint-aware): `block` (soundex/first3/ngram/norm blocking keys, CN+EN), `match` (Jaro-Winkler p=0.25 — same convention as fuzzy lib — jaro, lev), `resolve` (blocking → weighted multi-field scoring → threshold edges → union-find connected components → canonical; `records` table mode for direct Lua / parallel-array mode for SQL multi-column LISTs — extension LIST-of-STRUCT bridge not yet supported). Honest limits: soundex is English-only; missed blocking key = missed pair, use multi-key blocking in prod; in-memory, ≤ ~10k rows | none |
+| `libs/privacy/privacy.lua` | privacy | Privacy primitives (pure Lua, self-contained): `dp_count`/`dp_sum`/`dp_mean` (ε-differential privacy, Laplace mechanism, linear sequential composition; Park-Miller LCG via Schrage — exact in doubles, no 2^53 overflow, seedable), `laplace` (mechanism exposed), `mask` (salted FNV-1a with exact mul32 wrap / star / bin generalization / suppress / deterministic rand), `kanon` (k-anonymity, simplified Mondrian: range-width splitting + interval/prefix generalization; l-diversity honestly unimplemented) | none |
 
 ## One-SQL Install Protocol (v0.31+ recommended: `install` / `list_remote`)
 
@@ -77,7 +83,7 @@ LOAD 'luajit';
 
 -- 0. List available libs (INDEX protocol, cached automatically)
 SELECT * FROM luajit_module(mode := 'list_remote');
--- → available libs: dicom / dirscan / export / json / base64 / crc32 / uuid / html_escape / sudoku / tdx
+-- → available libs: dicom / dirscan / export / json / base64 / crc32 / uuid / html_escape / sudoku / tdx / psi / entity / privacy
 
 -- 1. Install & register with one statement (scalar UDFs callable right away)
 SELECT * FROM luajit_module(mode := 'install', sql_name := 'base64');

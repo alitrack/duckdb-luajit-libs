@@ -25,10 +25,26 @@
 --   * reasoning 模型（qwen3）默认 enable_thinking=false 关思考（提取任务要快），
 --     需要深度推理时 p.thinking=true 开启；
 --   * 批量场景 = DuckDB 逐行调标量 UDF（每行一次 LLM 调用，本地 vLLM 高并发可接受）；
+--     同 text 多行重复（低基数列）时开 p.cache=true：结果按 (endpoint,model,text,
+--     schema,examples) 键缓存，重复输入直接回缓存——借鉴 VGI exchange input dedup
+--     的「distinct 输入只算一次」思路，但落在 Lua 层显式 opt-in（LLM 非纯函数，
+--     默认不缓存；temperature=0 的确定性提取场景开启才 sound）；
 --   * 端点/模型可配（p.endpoint / p.model / 环境变量 LLM_EXTRACT_ENDPOINT），
 --     不绑定任何云厂商，本地模型零成本。
 
 local M = {}
+
+-- opt-in 结果缓存：p.cache=true 时启用。键 = 影响输出的全部参数；值 = content。
+-- 容量上限 512 防长会话内存膨胀（超限整体清空，简单策略够用——批量场景
+-- distinct 输入通常远小于 512）。错误结果不缓存（只缓存成功 content）。
+local result_cache = {}
+local cache_count = 0
+local CACHE_MAX = 512
+local function cache_key(p, op)
+  local parts = { op, p.endpoint or '', p.model or '', p.text or '', p.schema or '',
+    p.examples or '', p.system or '', tostring(p.temperature or 0) }
+  return table.concat(parts, '\1')
+end
 
 -- ============ JSON 工具（最小实现，避免依赖顺序） ============
 -- 字符串 → JSON 字符串字面量（转义控制字符/引号/反斜杠）
@@ -147,8 +163,8 @@ local function post_chat(endpoint, body, timeout)
   f:write(body)
   f:close()
   local cmd = string.format(
-    "curl -s --max-time %d -X POST '%s/v1/chat/completions' -H 'Content-Type: application/json' --data-binary @'%s'",
-    timeout or 120, endpoint, tmp)
+    "curl -s --max-time %s -X POST '%s/v1/chat/completions' -H 'Content-Type: application/json' --data-binary @'%s'",
+    tostring(timeout or 120), endpoint, tmp)
   local pipe = io.popen(cmd)
   if not pipe then os.remove(tmp) return nil, 'io.popen failed (needs normal mode)' end
   local resp = pipe:read('*a')
@@ -194,6 +210,16 @@ end
 return function(p)
   if type(p) ~= 'table' then return 'error: llm_extract expects a struct argument' end
   local op = p.op or 'extract'
+  -- opt-in 结果缓存（见头部注释）：键覆盖影响输出的全部参数；只缓存成功结果。
+  -- 缓存命中直接返回，不发 HTTP——同 text 低基数列批量提取时把 N 次 LLM 调用
+  -- 降为 distinct 次数（借鉴 VGI exchange input dedup，Lua 层显式版）。
+  local use_cache = p.cache == true
+  local ck
+  if use_cache then
+    ck = cache_key(p, op)
+    local hit = result_cache[ck]
+    if hit ~= nil then return hit end
+  end
   local r, err
   if op == 'chat' then
     -- 通用对话：直接回 content
@@ -206,5 +232,15 @@ return function(p)
     r, err = M.extract(p)
   end
   if not r then return 'error: ' .. tostring(err) end
+  if use_cache then
+    if result_cache[ck] == nil then
+      if cache_count >= CACHE_MAX then
+        result_cache = {}   -- 超限整体清空（简单策略）
+        cache_count = 0
+      end
+      result_cache[ck] = r
+      cache_count = cache_count + 1
+    end
+  end
   return r
 end

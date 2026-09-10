@@ -26,3 +26,9 @@ SELECT luajit_s('privacy', {'op':'kanon',
   'age':[25,26,60,61],
   'city':['hz','hz','sh','sh'],
   'id':[1,2,3,4], 'k':2}) AS kanon;
+-- privacy :: CN 合规脱敏 + 临床日期平移（2026-09-10）
+SELECT luajit_s('privacy', {'op':'mask_cn', 'kind':'idcard', 'v':'110101199003071234'}) AS cn_idcard;
+SELECT luajit_s('privacy', {'op':'mask_cn', 'v':'13800138000'}) AS cn_mobile_auto;
+SELECT luajit_s('privacy', {'op':'mask_cn', 'kind':'name', 'v':'欧阳锋'}) AS cn_name;
+SELECT luajit_s('privacy', {'op':'dateshift', 'v':'2150-03-04', 'key':'10001', 'days':180, 'with_delta':true}) AS shifted;
+SELECT luajit_s('privacy', {'op':'dateoffset', 'key':'10001', 'days':180}) AS offset_days;

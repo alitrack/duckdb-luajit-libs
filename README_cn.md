@@ -26,7 +26,7 @@ English README: [README.md](README.md)
 | `libs/mcp/` | **MCP 集成**——DuckDB 作为 MCP server，把 Lua UDF 发布成 tools 给 AI 助手调用 | mcp-server（sudoku_solve 示例） |
 | `libs/quality/` | **数据质量**——分布/漂移检测 | psi（PSI/KL/卡方，画像+漂移） |
 | `libs/entity/` | **实体解析**——记录链接管道 | entity（blocking+相似度+连通分量聚类） |
-| `libs/privacy/` | **隐私工程**——差分隐私/脱敏/k-匿名 | privacy（dp_count/dp_sum/dp_mean、mask、kanon） |
+| `libs/privacy/` | **隐私工程**——差分隐私/脱敏/k-匿名/临床日期平移 | privacy（dp_count/dp_sum/dp_mean、mask、mask_cn、dateshift、kanon） |
 
 ## 库索引
 
@@ -73,7 +73,7 @@ English README: [README.md](README.md)
 | `libs/datasource/tdx.lua` | datasource | 通达信（TDX）股票行情数据：.lc1/.lc5/.day 格式解析，32字节/记录，小端序。**错误可见化**：路径错/文件缺失/扩展名非 .lc1/.lc5/.day/大小非 32 倍数 → 一行 `ERR: <原因> @ <path>`（字段2-7 为 0，`::FLOAT` 可转）+ 全部失败时首行 `0/N files parsed` 汇总，聚合得 NULL 时 select * 即可看到原因。**WSL**：路径用 `/mnt/d/...`（正斜杠），不能用 `D:\\...`。**说明**：扩展表函数曾有一个并行 0 行 bug（按名调用只在注册线程的 TLS Lua state 里解析到 lib，worker 线程拿不到 global 就误把名字当 inline source 编译成 nil → 0 行）——**已在 C 扩展修复**（tbt_init 现在会回退到共享源表）。若在用未修复的旧扩展二进制，可 `set threads=1;` 绕过（只是掩盖 bug，不是修复） | 无（ffi） |
 | `libs/quality/psi.lua` | quality | 数据漂移检测（纯 Lua 自包含）：`psi`（Population Stability Index，占比/自动分箱/显式边界三模式）、`kl`（KL 散度 nats）、`chi2`、`report`（{psi,kl,chi2,verdict,bins,n} JSON，verdict=no/moderate/significant-drift 阈值 0.1/0.25）。空箱 0.0001 钳制（业界惯例）；常量列/单值分布兜底为 0。配 dq/etl.validate 做质量门禁 | 无 |
 | `libs/entity/entity.lua` | entity | 实体解析管道（纯 Lua 自包含，UTF-8 代码点级）：`block`（soundex/first3/ngram/norm 四类 blocking 键，中英文通用）、`match`（Jaro-Winkler p=0.25 与 fuzzy lib 同口径、jaro、lev）、`resolve`（blocking → 多字段加权打分 → 超阈值连边 → union-find 连通分量 → canonical；records 表模式 Lua 直调 / 并行数组模式 SQL 侧传多列 LIST——扩展 LIST-of-STRUCT 桥接暂未支持）。诚实边界：soundex 仅英文；blocking 漏键即漏配对，生产多键并联；全内存实现万级以内 | 无 |
-| `libs/privacy/privacy.lua` | privacy | 隐私工程原语（纯 Lua 自包含）：`dp_count`/`dp_sum`/`dp_mean`（ε-差分隐私，Laplace 机制，顺序组合线性预算；Park-Miller LCG Schrage 法——double 精确无 2^53 溢出，seed 可复现）、`laplace`（机制暴露）、`mask`（hash 盐化 FNV-1a(mul32 精确回绕)/star/bin 泛化/suppress/rand 确定性替换）、`kanon`（k-匿名 Mondrian 简化：等权范围分裂 + 区间/前缀泛化，l-diversity 未实现诚实标注） | 无 |
+| `libs/privacy/privacy.lua` | privacy | 隐私工程原语（纯 Lua 自包含）：`dp_count`/`dp_sum`/`dp_mean`（ε-差分隐私，Laplace 机制，顺序组合线性预算；Park-Miller LCG Schrage 法——double 精确无 2^53 溢出，seed 可复现）、`laplace`（机制暴露）、`mask`（hash 盐化 FNV-1a(mul32 精确回绕)/star/bin 泛化/suppress/rand 确定性替换）、**`mask_cn`（CN 合规脱敏规则库：身份证前 6 后 4 / 手机号前 3 后 4 / 银行卡前 6（BIN）后 4 / 姓名保留姓（复姓识别）/ 邮箱保留首字符+域名；`kind:'auto'` 自识别；`mode:'star'` 格式保持、`'hash'` 确定性指纹可作外键、`'birth'` 身份证生日泛化到年；识别失败 fail-closed 退通用 star）**、**`dateshift`/`dateoffset`（临床 MIMIC 式日期平移：偏移 = FNV-1a(key) mod (2·days+1) − days 只依赖 subject 键 → 同 subject 恒定偏移，住院时长/事件间隔逐位不变，绝对日期不可反推；Howard Hinnant civil-days 纯整数，闰年精确——实测 2,055 例覆盖 1900–2200 全区间（含全部闰日）与 Python datetime 逐例一致；DuckDB 端 12 项断言全过：零泄漏、外键哈希连接行数不变、同 subject 偏移漂移 0、|偏移| ≤ days、住院时长与相对窗口平移前后集合相等）**、`kanon`（k-匿名 Mondrian 简化：等权范围分裂 + 区间/前缀泛化，l-diversity 未实现诚实标注） | 无 |
 
 ### 增量加载 × DuckLake 数据湖（实测组合）
 

@@ -23,6 +23,24 @@
 --     泛化规则：数值 → [min,max] 区间；字符串 → 共享最长前缀（无共享 → '*')
 --     诚实边界：简化版只做等权分裂（范围最宽维度优先），非严格 Mondrian 信息损失最小化；
 --     l-diversity/t-closeness 未实现（生产需补）；DP 机制假设 SQL 侧已完成真实聚合（本 lib 不查表）。
+--   【CN 合规脱敏规则库】（GB/T 37964 去标识化常用形态；格式保持 = 长度/位数不变，下游长度校验不炸）
+--   op='mask_cn'：p.v 待脱敏值、p.kind ∈ {'idcard','mobile','bankcard','name','email','generic','auto'}
+--     （默认 'auto'：按值自识别）、p.mode ∈ {'star','hash','birth'}：
+--       'star'：按 CN 规则保留可识别前后缀、其余 '*'——
+--               身份证前 6（行政区划）后 4 / 手机号前 3 后 4 / 银行卡前 6（BIN）后 4 /
+--               姓名保留姓（复姓保留 2 字）/ 邮箱保留首字符 + 域名；
+--               **识别失败或长度不符 → fail-closed 退回通用 star（保留首 1 尾 1）**，绝不原样透出
+--       'hash'：保留同一前缀 + '#' + FNV-1a 32 位指纹（p.salt 盐化）→ 同输入同输出，可作外键连接键
+--       'birth'：仅 idcard —— 出生日期泛化到年（前 6 + YYYY + '0101' + 后 4，长度不变）
+--     例：idcard → '110101********1234'；mobile → '138****8000'；bankcard → '622202********1234'；name → '张**'
+--   【日期平移】（临床 MIMIC 式去标识：同 subject 恒同偏移 → subject 内相对时间完整保留）
+--   op='dateshift'：p.v 日期（'YYYY-MM-DD'，可带 ' HH:MM:SS' 后缀，时间部分原样保留）、
+--     p.key subject 键、p.days 最大绝对偏移天数（默认 180）、p.salt（默认 'dateshift'）、
+--     p.with_delta=true 时返回 'date|delta'（delta 供数据字典登记）。
+--     偏移 = FNV-1a(key, salt) mod (2·days+1) − days ∈ [−days, days]，**只依赖 key 不依赖日期**
+--     → 同 subject 各行偏移恒定 ⇒ 住院第几天/两事件间隔等相对时间逐位不变；
+--     p.key 缺省 = ''（全局单一偏移，仍不可反推绝对日期）。非法日期返回 'null'。
+--   op='dateoffset'：只返回该 key 的偏移天数（整数），供数据字典 / 审计登记。
 --
 -- Usage (duckdb-luajit, scalar mode):
 --   install:  SELECT * FROM luajit_module(mode:='install', sql_name:='privacy');
@@ -32,6 +50,11 @@
 --   kanon:    SELECT luajit_s('privacy', {records:[{id:1,qi:{age:25,city:'hz'}},{id:2,qi:{age:26,city:'hz'}},
 --             {id:3,qi:{age:60,city:'sh'}},{id:4,qi:{age:61,city:'sh'}}], k:2, op:'kanon'});
 --             → 两组各 2 条：age 泛化为 [25,26]/[60,61]，city 保留共享前缀
+--   mask_cn:  SELECT luajit_s('privacy', {v:'110101199003071234', kind:'idcard', op:'mask_cn'});   → '110101********1234'
+--             SELECT luajit_s('privacy', {v:'13800138000', op:'mask_cn'});                          → '138****8000'（auto 识别）
+--             SELECT luajit_s('privacy', {v:'张三', kind:'name', mode:'hash', salt:'k1', op:'mask_cn'}); → '张#<8位指纹>'
+--   dateshift:SELECT luajit_s('privacy', {v:'2150-03-04', key:'10001', days:180, op:'dateshift'});
+--             → 如 '2150-01-12'（同 key 恒定偏移）；with_delta=true → '2150-01-12|-51'
 
 local privacy = {}
 local json_encode  -- 前向声明（定义在文件后部，调用发生在 chunk 加载完成后）
@@ -284,6 +307,199 @@ local function kanon(p)
 end
 
 -- ======================================================================
+-- CN 合规脱敏规则库（mask_cn）
+--   设计三原则：① 格式保持（位数不变 → 下游长度校验/落库不炸）
+--              ② fail-closed（识别不出 / 长度不符 → 退通用 star 全掩，绝不原样透出）
+--              ③ hash 模式确定性（同输入同输出 → 可当外键连接键）
+-- ======================================================================
+
+-- UTF-8 按字符切分（中文姓名/复姓必须按「字」处理，按字节切会输出半个汉字）
+local function utf8_chars(s)
+  local t, i = {}, 1
+  while i <= #s do
+    local b = s:byte(i)
+    local n
+    if b < 128 then n = 1
+    elseif b < 224 then n = 2
+    elseif b < 240 then n = 3
+    else n = 4 end
+    t[#t + 1] = s:sub(i, i + n - 1)
+    i = i + n
+  end
+  return t
+end
+
+-- 复姓表：命中则姓名保留 2 字姓，否则保留 1 字
+local COMPOUND_SURNAMES = {
+  ['欧阳'] = true, ['司马'] = true, ['上官'] = true, ['诸葛'] = true, ['东方'] = true,
+  ['皇甫'] = true, ['尉迟'] = true, ['公孙'] = true, ['慕容'] = true, ['司徒'] = true,
+  ['令狐'] = true, ['宇文'] = true, ['长孙'] = true, ['独孤'] = true, ['南宫'] = true,
+  ['西门'] = true, ['夏侯'] = true, ['端木'] = true, ['呼延'] = true, ['澹台'] = true,
+}
+
+-- 通用 star（fail-closed 兜底；非 ASCII 走按字切分，避免产出非法 UTF-8）
+local function generic_star(v, head, tail)
+  head, tail = head or 1, tail or 1
+  if v:match('[\128-\255]') then
+    local chars = utf8_chars(v)
+    if #chars <= head + tail then return string.rep('*', #chars) end
+    return table.concat(chars, '', 1, head) .. string.rep('*', #chars - head - tail)
+      .. table.concat(chars, '', #chars - tail + 1)
+  end
+  if #v <= head + tail then return string.rep('*', #v) end
+  return v:sub(1, head) .. string.rep('*', #v - head - tail) .. v:sub(-tail)
+end
+
+-- 值类型自识别（kind='auto'）
+local function cn_detect(v)
+  if v:match('^%d+$') then
+    if #v == 18 or #v == 15 then return 'idcard' end
+    if #v == 11 and v:sub(1, 1) == '1' and v:sub(2, 2):match('[3-9]') then return 'mobile' end
+    if #v >= 16 and #v <= 19 then return 'bankcard' end
+    return nil
+  end
+  if v:match('^[^@%s]+@[^@%s]+%.[^@%s]+$') then return 'email' end
+  local chars = utf8_chars(v)
+  if #chars >= 2 and #chars <= 6 then
+    local all_cjk = true
+    for _, c in ipairs(chars) do
+      if #c ~= 3 then all_cjk = false break end  -- 3 字节 = CJK 统一表意文字
+    end
+    if all_cjk then return 'name' end
+  end
+  return nil
+end
+
+local function mask_cn(p)
+  local v = tostring(p.v or '')
+  if v == '' then return '' end
+  local kind = p.kind or 'auto'
+  if kind == 'auto' then kind = cn_detect(v) or 'generic' end
+  local mode = p.mode or 'star'
+  local fp = string.format('%08x', fnv1a(v, p.salt or ''))
+
+  -- hash 模式：保留规则前缀 + 指纹（确定性 → 外键/连接键可用）
+  if mode == 'hash' then
+    if kind == 'idcard' and (#v == 18 or #v == 15) then return v:sub(1, 6) .. '#' .. fp end
+    if kind == 'bankcard' and #v >= 16 and #v <= 19 then return v:sub(1, 6) .. '#' .. fp end
+    if kind == 'mobile' and #v == 11 then return v:sub(1, 3) .. '#' .. fp end
+    if kind == 'name' then
+      local chars = utf8_chars(v)
+      local keep = (chars[2] and COMPOUND_SURNAMES[chars[1] .. chars[2]]) and 2 or 1
+      if #chars <= keep then return string.rep('*', #chars) end
+      return table.concat(chars, '', 1, keep) .. '#' .. fp
+    end
+    if kind == 'email' then
+      local at = v:find('@')
+      if at and at > 1 then return v:sub(1, 1) .. '#' .. fp .. v:sub(at) end
+    end
+    return generic_star(v) .. '#' .. fp
+  end
+
+  -- star / birth：按 CN 规则掩码
+  if kind == 'idcard' then
+    -- birth 模式：出生日期泛化到年（GB/T 37964 常用；长度不变）
+    -- 18 位 = 6 区划 + 8 出生(YYYYMMDD) + 4；15 位 = 6 区划 + 6 出生(YYMMDD) + 3
+    if mode == 'birth' and #v == 18 then
+      local y, m0, d0 = v:match('^%d%d%d%d%d%d(%d%d%d%d)(%d%d)(%d%d)%d%d%d%d$')
+      if y and tonumber(m0) >= 1 and tonumber(m0) <= 12 and tonumber(d0) >= 1 and tonumber(d0) <= 31 then
+        return v:sub(1, 6) .. y .. '0101' .. v:sub(-4)
+      end
+    end
+    if mode == 'birth' and #v == 15 then
+      local y, m0, d0 = v:match('^%d%d%d%d%d%d(%d%d)(%d%d)(%d%d)%d%d%d$')
+      if y and tonumber(m0) >= 1 and tonumber(m0) <= 12 and tonumber(d0) >= 1 and tonumber(d0) <= 31 then
+        return v:sub(1, 6) .. y .. '0101' .. v:sub(-3)
+      end
+    end
+    if #v == 18 then return v:sub(1, 6) .. string.rep('*', 8) .. v:sub(-4) end
+    if #v == 15 then return v:sub(1, 6) .. string.rep('*', 5) .. v:sub(-4) end
+    return generic_star(v)
+  elseif kind == 'mobile' then
+    if #v == 11 then return v:sub(1, 3) .. string.rep('*', 4) .. v:sub(-4) end
+    return generic_star(v)
+  elseif kind == 'bankcard' then
+    if #v >= 16 and #v <= 19 then return v:sub(1, 6) .. string.rep('*', #v - 10) .. v:sub(-4) end
+    return generic_star(v)
+  elseif kind == 'name' then
+    local chars = utf8_chars(v)
+    local keep = (chars[2] and COMPOUND_SURNAMES[chars[1] .. chars[2]]) and 2 or 1
+    if #chars <= keep then return string.rep('*', #chars) end
+    return table.concat(chars, '', 1, keep) .. string.rep('*', #chars - keep)
+  elseif kind == 'email' then
+    local at = v:find('@')
+    if at and at > 1 then return v:sub(1, 1) .. '***' .. v:sub(at) end
+    return generic_star(v)
+  end
+  return generic_star(v, p.head, p.tail)
+end
+
+-- ======================================================================
+-- 日期平移（dateshift / dateoffset）—— MIMIC 式临床去标识
+--   偏移只由 key 决定（与日期无关）⇒ ① 同 subject 恒定 ② |偏移| ≤ days
+--   ③ subject 内任意两日期之差逐位不变（相对时间完整保留）
+--   civil-days 用 Howard Hinnant 算法（proleptic Gregorian，纯整数，闰年精确）
+-- ======================================================================
+local function days_from_civil(y, m, d)
+  y = (m <= 2) and (y - 1) or y
+  local era = math.floor(y / 400)
+  local yoe = y - era * 400
+  local doy = math.floor((153 * (m + ((m > 2) and -3 or 9)) + 2) / 5) + d - 1
+  local doe = yoe * 365 + math.floor(yoe / 4) - math.floor(yoe / 100) + doy
+  return era * 146097 + doe - 719468
+end
+
+local function civil_from_days(z)
+  z = z + 719468
+  local era = math.floor(z / 146097)
+  local doe = z - era * 146097
+  local yoe = math.floor((doe - math.floor(doe / 1460) + math.floor(doe / 36524) - math.floor(doe / 146096)) / 365)
+  local y = yoe + era * 400
+  local doy = doe - (365 * yoe + math.floor(yoe / 4) - math.floor(yoe / 100))
+  local mp = math.floor((5 * doy + 2) / 153)
+  local d = doy - math.floor((153 * mp + 2) / 5) + 1
+  local m = mp + ((mp < 10) and 3 or -9)
+  return y + ((m <= 2) and 1 or 0), m, d
+end
+
+-- 解析 'YYYY-MM-DD[...]' 并做日历合法性校验（拒绝 2023-02-30）
+local function parse_ymd(v)
+  local y, m, d, rest = v:match('^(%d%d%d%d)%-(%d%d)%-(%d%d)(.*)$')
+  if not y then return nil end
+  y, m, d = tonumber(y), tonumber(m), tonumber(d)
+  if m < 1 or m > 12 or d < 1 or d > 31 then return nil end
+  local rz = days_from_civil(y, m, d)
+  local y2, m2, d2 = civil_from_days(rz)
+  if y2 ~= y or m2 ~= m or d2 ~= d then return nil end  -- 回环校验：剔除非法日历日
+  return y, m, d, rest
+end
+
+-- key → 偏移天数 ∈ [-days, days]
+local function key_offset(key, salt, days)
+  local h = fnv1a(tostring(key or ''), salt or 'dateshift')
+  return (h % (2 * days + 1)) - days
+end
+
+local function dateshift(p)
+  local v = tostring(p.v or '')
+  if v == '' then return 'null' end
+  local y, m, d, rest = parse_ymd(v)
+  if not y then return 'null' end
+  local days = math.floor(math.abs(tonumber(p.days) or 180))
+  local off = days == 0 and 0 or key_offset(p.key, p.salt, days)
+  local ny, nm, nd = civil_from_days(days_from_civil(y, m, d) + off)
+  local out = string.format('%04d-%02d-%02d%s', ny, nm, nd, rest)
+  if p.with_delta then return out .. '|' .. off end
+  return out
+end
+
+local function dateoffset(p)
+  local days = math.floor(math.abs(tonumber(p.days) or 180))
+  if days == 0 then return '0' end
+  return string.format('%d', key_offset(p.key, p.salt, days))
+end
+
+-- ======================================================================
 -- 内联 JSON 编码器（零外部依赖）
 -- ======================================================================
 local function esc_str(s)
@@ -334,6 +550,9 @@ local function run(p)
     local rng = make_rng(p.seed or os.time())
     return string.format('%.6f', laplace(p.scale or 1.0, rng))
   elseif op == 'mask' then return mask(p)
+  elseif op == 'mask_cn' then return mask_cn(p)
+  elseif op == 'dateshift' then return dateshift(p)
+  elseif op == 'dateoffset' then return dateoffset(p)
   elseif op == 'kanon' then return kanon(p)
   end
   return ''

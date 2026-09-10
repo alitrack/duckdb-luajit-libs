@@ -154,5 +154,152 @@ check('dateshift invalid calendar day', f({ v = '2023-02-30', key = 'k', op = 'd
 check('dateshift invalid month', f({ v = '2023-13-01', key = 'k', op = 'dateshift' }), 'null')
 check('dateshift garbage', f({ v = 'not-a-date', key = 'k', op = 'dateshift' }), 'null')
 
+-- ============ P1：ε 预算台账（dp_compose / dp_alloc / dp_budget）============
+-- JSON 字段提取：⚠️ Lua pattern 无 `|` 交替（写 (a|b) 会静默匹配失败 → nil），
+-- 故用「取到逗号/右花括号为止」再剥引号（本 lib 的字符串字段值里都不含逗号）
+local function jget(s, key)
+  local v = s:match('"' .. key .. '":([^,}]+)')
+  if not v then return nil end
+  if v:sub(1, 1) == '"' then return v:sub(2, -2) end
+  return v
+end
+local function jnum(s, key) return tonumber(jget(s, key)) end
+local function jbool(s, key) return jget(s, key) == 'true' end
+local function jnear(a, b, tol) return a ~= nil and math.abs(a - b) <= (tol or 1e-3) end
+
+-- 锚 10: dp_compose —— basic 精确；advanced = Dwork-Roth 强组合
+local cp10 = f({epsilon = 0.1, count = 10, delta = 1e-5, op = 'dp_compose'})
+check('compose n', jnum(cp10, 'n'), 10)
+ok('compose basic = Σε', jnear(jnum(cp10, 'basic_total'), 1.0, 1e-6))
+ok('compose advanced (n=10,ε=0.1) ≈ 1.6226', jnear(jnum(cp10, 'advanced_total'), 1.622598, 1e-4))
+ok('compose small n: advanced > basic（诚实：此时应取 basic）',
+  jnum(cp10, 'advanced_total') > jnum(cp10, 'basic_total'))
+-- n=100, ε=0.01 → 强组合 0.4899 < basic 1.0（大 n 时高级组合更紧 = 记账的价值）
+local cp100 = f({epsilon = 0.01, count = 100, delta = 1e-5, op = 'dp_compose'})
+ok('compose advanced (n=100,ε=0.01) ≈ 0.4899', jnear(jnum(cp100, 'advanced_total'), 0.489903, 1e-4))
+ok('compose large n: advanced < basic', jnum(cp100, 'advanced_total') < jnum(cp100, 'basic_total'))
+-- 数组形式与均匀形式一致
+local arr = {}
+for i = 1, 10 do arr[i] = 0.1 end
+local cp_arr = f({epsilons = arr, delta = 1e-5, op = 'dp_compose'})
+ok('compose array == uniform', jnear(jnum(cp_arr, 'advanced_total'), jnum(cp10, 'advanced_total'), 1e-9))
+
+-- 锚 11: dp_alloc —— 同预算下切给 n 条查询；两种界取更紧者
+local al100 = f({budget = 1.0, n = 100, delta = 1e-5, op = 'dp_alloc'})
+check('alloc best@n=100', jget(al100, 'best'), 'advanced')
+ok('alloc per_query@n=100（默认 basic）= 0.01', jnear(jnum(al100, 'per_query'), 0.01, 1e-9))
+ok('alloc 推荐值 ≈ 0.02（比 basic 翻倍 = 记账的价值）',
+  jnear(jnum(al100, 'recommended_per_query'), 0.019998, 5e-4))
+ok('alloc 界不超预算', jnum(al100, 'advanced_total') <= 1.0 + 1e-9)
+local al10 = f({budget = 1.0, n = 10, delta = 1e-5, op = 'dp_alloc'})
+check('alloc best@n=10 (basic 更紧)', jget(al10, 'best'), 'basic')
+ok('alloc n=10: basic_per > advanced_per', jnum(al10, 'basic_per') > jnum(al10, 'advanced_per'))
+local al10a = f({budget = 1.0, n = 10, delta = 1e-5, composition = 'advanced', op = 'dp_alloc'})
+ok('alloc 强制 advanced 口径时 per_query = advanced_per',
+  jnear(jnum(al10a, 'per_query'), jnum(al10a, 'advanced_per'), 1e-9))
+
+-- 锚 12: dp_budget —— 单步台账门禁（账本求和 / 标量 spent / 超预算拒批 / 高级组合口径）
+local b1 = f({budget = 1.0, request = 0.4, ledger = {{epsilon = 0.3}, {epsilon = 0.2}}, op = 'dp_budget'})
+ok('budget allow', jbool(b1, 'allow'))
+check('budget entries', jnum(b1, 'entries'), 2)
+ok('budget spent_after=0.9', jnear(jnum(b1, 'spent_after'), 0.9, 1e-6))
+ok('budget remaining_after=0.1', jnear(jnum(b1, 'remaining_after'), 0.1, 1e-6))
+local b2 = f({budget = 1.0, request = 0.6, ledger = {{epsilon = 0.3}, {epsilon = 0.2}}, op = 'dp_budget'})
+ok('budget deny over budget', not jbool(b2, 'allow'))
+check('budget deny reason', jget(b2, 'reason'), 'budget_exceeded')
+local b3 = f({budget = 1.0, request = 0.3, spent = 0.8, op = 'dp_budget'})
+ok('budget 标量 spent 也计入', not jbool(b3, 'allow') and jnear(jnum(b3, 'spent_before'), 0.8, 1e-6))
+-- 100×0.01 用 basic 已正好耗尽 1.0（1.00）；advanced 认为只花 0.4899 → 再申请 0.01 仍放行（两种口径对照）
+-- 注：advanced = Σε(e^ε−1) + √(2 ln(1/δ') · Σε_i²) —— 根号项不乘 ε（Σε_i² 已含 ε²），
+--     20×0.05 时 advanced=1.124 > basic=1.0（小 n 高级组合更差），故必须用 n 大、ε 小的账本
+local led100 = {}
+for i = 1, 100 do led100[i] = {epsilon = 0.01} end
+local b4 = f({budget = 1.0, request = 0.01, ledger = led100, composition = 'advanced', op = 'dp_budget'})
+local b5 = f({budget = 1.0, request = 0.01, ledger = led100, op = 'dp_budget'})
+ok('budget advanced 口径放行（basic 已耗尽 1.0）', jbool(b4, 'allow'))
+ok('budget basic 口径同例拒批', not jbool(b5, 'allow'))
+ok('budget advanced total_before(100×0.01) ≈ 0.4899',
+  jnear(jnum(b4, 'total_before'), 0.489903, 1e-4))
+ok('budget advanced total_after(101×0.01) ≈ 0.4924', jnear(jnum(b4, 'total_after'), 0.492396, 1e-4))
+-- 反向对照：20×0.05（小 n）高级组合反而更差 → 同预算下仍应拒批
+local led20 = {}
+for i = 1, 20 do led20[i] = {epsilon = 0.05} end
+local b6 = f({budget = 1.0, request = 0.05, ledger = led20, composition = 'advanced', op = 'dp_budget'})
+ok('budget 小 n：advanced 界(1.124) > budget → 仍拒批', not jbool(b6, 'allow'))
+ok('budget 小 n advanced total_after(21×0.05) ≈ 1.153316', jnear(jnum(b6, 'total_after'), 1.153316, 1e-4))
+
+-- ============ P1：kanon_report（l-diversity / t-closeness / 抑制率 / 泛化损失）============
+local kr_recs = {
+  {id = 1, qi = {age = 25, city = 'hz'}, sens = 'A'},
+  {id = 2, qi = {age = 26, city = 'hz'}, sens = 'B'},
+  {id = 3, qi = {age = 60, city = 'sh'}, sens = 'A'},
+  {id = 4, qi = {age = 61, city = 'sh'}, sens = 'A'},
+}
+-- 锚 13: 全局分布 A:3 B:1；两组各 2 条 → 组1 {A,B}(distinct-l=2,H=1bit,TV=0.25)、组2 {A,A}(distinct-l=1,H=0,TV=0.25)
+local kr = f({records = kr_recs, k = 2, l = 2, t = 0.2, op = 'kanon_report'})
+check('report groups', jnum(kr, 'groups'), 2)
+check('report k_ok', jbool(kr, 'k_ok'), true)
+check('report min_class_size', jnum(kr, 'min_class_size'), 2)
+check('report min_distinct_l = 1（组2 单值）', jnum(kr, 'min_distinct_l'), 1)
+ok('report min_entropy_l = 0', jnear(jnum(kr, 'min_entropy_l'), 0, 1e-9))
+ok('report max_t = 0.25', jnear(jnum(kr, 'max_t'), 0.25, 1e-6))
+check('report t_metric=tv', jget(kr, 't_metric'), 'tv')
+check('report verdict=fail（l 与 t 双违）', jget(kr, 'verdict'), 'fail')
+ok('report violations = [l,t]', kr:match('"violations":%["l","t"%]') ~= nil)
+ok('report 抑制率 0', jnear(jnum(kr, 'suppression_rate'), 0, 1e-9))
+ok('report 泛化损失 ≈ 0.0139（age 1/36 跨度，city 组内同值）',
+  jnear(jnum(kr, 'generalization_loss'), 0.013889, 1e-4))
+-- l=1、t=0.3 → 通过（对照：只放宽阈值，数据未变）
+local kr2 = f({records = kr_recs, k = 2, l = 1, t = 0.3, op = 'kanon_report'})
+check('report 放宽后 pass', jget(kr2, 'verdict'), 'pass')
+ok('report 放宽后 l_ok/t_ok 均真', jbool(kr2, 'l_ok') and jbool(kr2, 't_ok'))
+ok('report 放宽后无 violation', kr2:match('"violations":%[%]') ~= nil)
+
+-- 锚 14: t-closeness 两种度量必须给出不同值（证明 TV 与 EMD 都真实实现）
+local ord_recs = {
+  {id = 1, qi = {age = 25, city = 'hz'}, sens = 1},
+  {id = 2, qi = {age = 26, city = 'hz'}, sens = 1},
+  {id = 3, qi = {age = 60, city = 'sh'}, sens = 2},
+  {id = 4, qi = {age = 61, city = 'sh'}, sens = 3},
+}
+local t_tv = f({records = ord_recs, k = 2, t = 0.9, op = 'kanon_report'})
+local t_emd = f({records = ord_recs, k = 2, t = 0.9, ordered = true, op = 'kanon_report'})
+check('TV 度量', jget(t_tv, 't_metric'), 'tv')
+check('EMD 度量（ordered=true）', jget(t_emd, 't_metric'), 'emd')
+ok('TV max_t = 0.5', jnear(jnum(t_tv, 'max_t'), 0.5, 1e-6))
+ok('EMD max_t = 0.375（同一数据，两种度量确实不同）', jnear(jnum(t_emd, 'max_t'), 0.375, 1e-6))
+ok('EMD ≠ TV', math.abs(jnum(t_emd, 'max_t') - jnum(t_tv, 'max_t')) > 0.1)
+-- EMD 用同一阈值 t=0.4：TV 判死、EMD 通过（度量选择影响结论 → 必须显式声明）
+local t_tv2 = f({records = ord_recs, k = 2, t = 0.4, op = 'kanon_report'})
+local t_emd2 = f({records = ord_recs, k = 2, t = 0.4, ordered = true, op = 'kanon_report'})
+ok('t=0.4 下 TV 不通过而 EMD 通过', not jbool(t_tv2, 't_ok') and jbool(t_emd2, 't_ok'))
+
+-- 锚 15: k 不足 → 抑制 + verdict fail（1 条 k=2）
+local kr4 = f({records = {{id = 1, qi = {age = 25}, sens = 'A'}}, k = 2, op = 'kanon_report'})
+check('report k 不足 verdict=fail', jget(kr4, 'verdict'), 'fail')
+ok('report suppressed=1', jnum(kr4, 'suppressed') == 1)
+ok('report 抑制率 = 1', jnear(jnum(kr4, 'suppression_rate'), 1.0, 1e-9))
+ok('report violations 含 k', kr4:match('"k"') ~= nil and not jbool(kr4, 'k_ok'))
+-- 锚 16: 并行数组模式 + sensitive_field（SQL 侧常用形态）
+local kr5 = f({age = {25, 26, 60, 61}, city = {'hz', 'hz', 'sh', 'sh'},
+  disease = {'A', 'B', 'A', 'A'}, k = 2, sensitive_field = 'disease', op = 'kanon_report'})
+check('report 数组模式 groups', jnum(kr5, 'groups'), 2)
+check('report 数组模式 min_distinct_l', jnum(kr5, 'min_distinct_l'), 1)
+ok('report 数组模式 verdict=fail', jget(kr5, 'verdict') == 'fail')
+-- 锚 17: 无敏感属性 → k 单判据，l/t 字段不出现（诚实：不假装算过）
+local kr6 = f({records = {
+  {id = 1, qi = {age = 25, city = 'hz'}}, {id = 2, qi = {age = 26, city = 'hz'}},
+  {id = 3, qi = {age = 60, city = 'sh'}}, {id = 4, qi = {age = 61, city = 'sh'}},
+}, k = 2, op = 'kanon_report'})
+check('report 无 sens → verdict 只看 k', jget(kr6, 'verdict'), 'pass')
+ok('report 无 sens 时不输出 l_ok/t_ok', jget(kr6, 'l_ok') == nil and jget(kr6, 't_ok') == nil)
+-- 锚 18: 原 kanon 返回格式未被 P1 改动（回归）
+local kreg = f({records = kr_recs, k = 2, op = 'kanon'})
+ok('原 kanon 格式不变（无 report 字段）', kreg:match('^%{"groups":') ~= nil and kreg:match('"suppressed":0') ~= nil
+  and kreg:match('"k":2') ~= nil and kreg:match('"report"') == nil)
+local kmissing = f({records = {}, k = 2, op = 'kanon'})
+check('kanon 缺输入沿用旧错误 JSON', kmissing, '{"error":"records required"}')
+check('kanon_report 缺输入同错误', f({records = {}, k = 2, op = 'kanon_report'}), '{"error":"records required"}')
+
 print(string.format("\nRESULT: %d passed, %d failed", passed, failed))
 os.exit(failed == 0 and 0 or 1)

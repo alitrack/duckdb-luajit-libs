@@ -113,3 +113,112 @@ FROM enc_deid d JOIN enc e USING (enc_id);
 -- 断言 12：去标识后绝对日期范围与原始不同（不可反推原始日期）
 SELECT MIN(admittime) AS orig_min, MAX(dischtime) AS orig_max FROM enc;
 SELECT MIN(admittime) AS deid_min, MAX(dischtime) AS deid_max FROM enc_deid;
+
+-- ============================================================
+-- 三、kanon_report：k/l/t 去标识化效果评估（GB/T 42460 要素）
+-- ============================================================
+CREATE OR REPLACE TABLE pts AS SELECT * FROM (VALUES
+  (1, 25, '310', 'A'), (2, 26, '310', 'B'), (3, 27, '310', 'A'), (4, 28, '310', 'C'),
+  (5, 60, '110', 'A'), (6, 61, '110', 'B'), (7, 62, '110', 'B'), (8, 63, '110', 'C')
+) t(id, age, zip, disease);
+
+-- 把整表聚合成并行数组后送进 lib（SQL 侧真实调用形态）
+CREATE OR REPLACE TABLE pts_args AS
+SELECT list(age) AS age, list(zip) AS zip, list(disease) AS disease FROM pts;
+
+SELECT luajit_s('privacy', {'op':'kanon_report', 'age':age, 'zip':zip, 'disease':disease,
+  'k':2, 'l':2, 't':0.4, 'sensitive_field':'disease'}) AS report_loose FROM pts_args;
+
+SELECT luajit_s('privacy', {'op':'kanon_report', 'age':age, 'zip':zip, 'disease':disease,
+  'k':2, 'l':2, 't':0.2, 'sensitive_field':'disease'}) AS report_tight FROM pts_args;
+
+-- 断言 13：t=0.4 通过、t=0.2 不通过（同一数据仅改阈值 → 判据真的在起作用，非恒定输出）
+SELECT COUNT(*) AS threshold_gate_broken_must_be_0 FROM pts_args
+WHERE json_extract_string(luajit_s('privacy', {'op':'kanon_report','age':age,'zip':zip,'disease':disease,
+        'k':2,'l':2,'t':0.4,'sensitive_field':'disease'}), '$.report.verdict') <> 'pass'
+   OR json_extract_string(luajit_s('privacy', {'op':'kanon_report','age':age,'zip':zip,'disease':disease,
+        'k':2,'l':2,'t':0.2,'sensitive_field':'disease'}), '$.report.verdict') <> 'fail';
+
+-- 断言 14：l 从 2 收紧到 3 → 必然违 l（每类只有 2 个病种）
+SELECT COUNT(*) AS l_gate_broken_must_be_0 FROM pts_args
+WHERE json_extract_string(luajit_s('privacy', {'op':'kanon_report','age':age,'zip':zip,'disease':disease,
+        'k':2,'l':3,'t':0.9,'sensitive_field':'disease'}), '$.report.l_ok') <> 'false'
+   OR json_extract_string(luajit_s('privacy', {'op':'kanon_report','age':age,'zip':zip,'disease':disease,
+        'k':2,'l':3,'t':0.9,'sensitive_field':'disease'}), '$.report.verdict') <> 'fail';
+
+-- 断言 15（跨层一致性）：report 的聚合字段必须等于其自带 groups 明细的再聚合
+--   （明细由同一次调用产出，但聚合走的是独立代码路径 → 能抓出累加器与明细不一致）
+WITH r AS (
+  SELECT luajit_s('privacy', {'op':'kanon_report','age':age,'zip':zip,'disease':disease,
+    'k':2,'l':2,'t':0.4,'sensitive_field':'disease'}) AS j FROM pts_args
+), g AS (
+  SELECT CAST(json_extract(j, '$.groups[*].size') AS BIGINT[])      AS sizes,
+         CAST(json_extract(j, '$.groups[*].distinct_l') AS BIGINT[]) AS dls,
+         CAST(json_extract(j, '$.groups[*].entropy_l') AS DOUBLE[])  AS ents,
+         CAST(json_extract(j, '$.groups[*].t') AS DOUBLE[])          AS ts,
+         json_extract(j, '$.report') AS rep
+  FROM r
+)
+SELECT COUNT(*) AS report_aggregate_mismatch_must_be_0 FROM g
+WHERE list_min(sizes) <> CAST(json_extract(rep, '$.min_class_size') AS BIGINT)
+   OR list_min(dls)   <> CAST(json_extract(rep, '$.min_distinct_l') AS BIGINT)
+   OR abs(list_min(ents) - CAST(json_extract(rep, '$.min_entropy_l') AS DOUBLE)) > 1e-9
+   OR abs(list_max(ts)   - CAST(json_extract(rep, '$.max_t') AS DOUBLE)) > 1e-9
+   OR list_sum(sizes) <> CAST(json_extract(rep, '$.n') AS BIGINT);
+
+-- 断言 16：等价类规模与抑制（k=3、仅 2 条 → 全部抑制，抑制率 1）
+SELECT luajit_s('privacy', {'op':'kanon_report', 'age':[25,26], 'zip':['310','310'],
+  'disease':['A','B'], 'k':3, 'l':1, 't':0.9, 'sensitive_field':'disease'}) AS small_case;
+
+SELECT COUNT(*) AS suppression_mismatch_must_be_0 FROM (SELECT 1)
+WHERE (SELECT json_extract_string(luajit_s('privacy', {'op':'kanon_report','age':[25,26],
+          'zip':['310','310'],'disease':['A','B'],'k':3,'l':1,'t':0.9,'sensitive_field':'disease'}),
+          '$.report.suppression_rate')) <> '1'
+   OR (SELECT json_extract_string(luajit_s('privacy', {'op':'kanon_report','age':[25,26],
+          'zip':['310','310'],'disease':['A','B'],'k':3,'l':1,'t':0.9,'sensitive_field':'disease'}),
+          '$.report.verdict')) <> 'fail';
+
+-- ============================================================
+-- 四、ε 预算台账：dp_compose / dp_alloc / dp_budget
+-- ============================================================
+-- 断言 17：强组合界必须严于 basic（n=100、ε=0.01 → 0.4899 vs 1.0）
+SELECT json_extract_string(luajit_s('privacy', {'op':'dp_compose','epsilon':0.01,'count':100,'delta':1e-5}),
+  '$.advanced_total') AS adv, json_extract_string(luajit_s('privacy',
+  {'op':'dp_compose','epsilon':0.01,'count':100,'delta':1e-5}), '$.basic_total') AS bas;
+
+SELECT COUNT(*) AS compose_bound_broken_must_be_0 FROM (SELECT 1)
+WHERE (SELECT CAST(json_extract_string(luajit_s('privacy', {'op':'dp_compose','epsilon':0.01,
+          'count':100,'delta':1e-5}), '$.advanced_total') AS DOUBLE))
+    >= (SELECT CAST(json_extract_string(luajit_s('privacy', {'op':'dp_compose','epsilon':0.01,
+          'count':100,'delta':1e-5}), '$.basic_total') AS DOUBLE));
+
+-- 断言 18：同样预算下高级组合给出更大单查询 ε（记账的价值）
+SELECT COUNT(*) AS alloc_gain_broken_must_be_0 FROM (SELECT 1)
+WHERE (SELECT CAST(json_extract_string(luajit_s('privacy', {'op':'dp_alloc','budget':1.0,
+          'n':100,'delta':1e-5}), '$.recommended_per_query') AS DOUBLE))
+   <= (SELECT CAST(json_extract_string(luajit_s('privacy', {'op':'dp_alloc','budget':1.0,
+          'n':100,'delta':1e-5}), '$.basic_per') AS DOUBLE));
+
+-- 断言 19：ledger 数组（SQL list() → 嵌套 struct）穿透桥接后求和正确
+--   5 笔共 0.80（0.1+0.2+0.05+0.15+0.3），申请 0.20 → 恰好用尽 1.0：allow=true、remaining_after=0
+WITH led AS (
+  SELECT list({'epsilon': eps}) AS arr, sum(eps) AS total
+  FROM (VALUES (0.1),(0.2),(0.05),(0.15),(0.3)) t(eps)
+), r AS (
+  SELECT luajit_s('privacy', {'op':'dp_budget','budget':1.0,'request':0.2,'ledger':arr}) AS j,
+         total FROM led
+)
+SELECT COUNT(*) AS ledger_bridge_mismatch_must_be_0 FROM r
+WHERE abs(CAST(json_extract_string(j, '$.spent_before') AS DOUBLE) - total) > 1e-9
+   OR json_extract_string(j, '$.allow') <> 'true'
+   OR abs(CAST(json_extract_string(j, '$.remaining_after') AS DOUBLE)) > 1e-9;
+
+-- 断言 20：超预算必拒批（同账本申请 0.3 → 1.10 > 1.0）
+WITH led AS (
+  SELECT list({'epsilon': eps}) AS arr FROM (VALUES (0.1),(0.2),(0.05),(0.15),(0.3)) t(eps)
+)
+SELECT COUNT(*) AS overbudget_not_denied_must_be_0 FROM led
+WHERE json_extract_string(luajit_s('privacy', {'op':'dp_budget','budget':1.0,'request':0.3,'ledger':arr}),
+        '$.allow') <> 'false'
+   OR json_extract_string(luajit_s('privacy', {'op':'dp_budget','budget':1.0,'request':0.3,'ledger':arr}),
+        '$.reason') <> 'budget_exceeded';

@@ -9,7 +9,17 @@
 --   op='dp_mean'：加噪均值。噪声在分子（sum）与分母（count）分别注入（Δf_sum=range, Δf_count=1），
 --     → 返回 (sum + Lap(range/ε)) / (count + Lap(1/ε))；count 加噪后 <1 则返回 NULL（数据太少）。
 --   op='laplace'：机制暴露。返回一维 Laplace(0, scale) 噪声值（教学/审计/组合机制用）。
---   组合：ε 预算线性组合（顺序组合），多查询请自行累计 ε 并控制总预算。
+--   【ε 预算台账】（顺序组合记账；本 lib 无状态 → 台账由调用方以 ledger 数组传入）
+--   op='dp_compose'：组合界。p.epsilon 单次 ε（或 p.epsilons 数组）、p.count（均匀 ε 的查询个数）、
+--     p.delta（高级组合的 δ'，默认 1e-5）→ 返回 {basic_total, advanced_total, n, delta}
+--     basic = Σε_i（顺序组合定理，精确）；advanced = Σε_i(e^{ε_i}−1) + √(2·ln(1/δ')·Σε_i²)（Dwork-Roth 强组合）
+--   op='dp_alloc'：把总预算切给 n 个计划查询。p.budget、p.n、p.delta、p.composition：
+--     'basic' → 每查询 ε = budget/n（和为 budget）；'advanced' → 二分求最大均匀 ε 使强组合界 ≤ budget
+--     （同样总预算下 advanced 能给出更大的单查询 ε —— 这就是记账的价值）
+--   op='dp_budget'：单步记账门禁。p.budget、p.request（本次申请 ε）、p.spent 或
+--     p.ledger=[{epsilon=..,op='dp_count'}]（历史消耗，自动求和）、p.composition、p.delta
+--     → 返回 {allow, spent_before/after, remaining_before/after, total_before/after, reason}
+--     allow=false（超预算）时 reason='budget_exceeded'
 --   【PII 脱敏】
 --   op='mask'：p.v 待脱敏值、p.mode：
 --     'hash'：FNV-1a 32 位 + 盐（p.salt 默认 ''）→ 保留前 p.keep（默认 2）字符 + '#' + 哈希 hex（8 位）
@@ -21,8 +31,14 @@
 --   op='kanon'：p.records = { {id=.., qi={age=.., city='..'}, sens=..}, ... }、p.k（默认 2）
 --     → 返回 JSON：{ groups:[{size, qi:[泛化区间/集合], ids:[...]}], suppressed: N }
 --     泛化规则：数值 → [min,max] 区间；字符串 → 共享最长前缀（无共享 → '*')
+--   op='kanon_report'：同上输入 + p.sens（敏感属性数组）或 p.sensitive_field（取 qi 里的字段）+
+--     p.l（默认 2）、p.t（默认 0.2）、p.ordered（敏感属性有序/数值 → t 用 EMD，否则用 TV）
+--     → 返回 k/l/t 三项检验 + 抑制率 + 泛化损失 + verdict（GB/T 42460 去标识化效果评估要素），
+--       并在每组附 distinct_l / entropy_l / t 值。l 取 distinct-l 与 entropy-l 双判据。
 --     诚实边界：简化版只做等权分裂（范围最宽维度优先），非严格 Mondrian 信息损失最小化；
---     l-diversity/t-closeness 未实现（生产需补）；DP 机制假设 SQL 侧已完成真实聚合（本 lib 不查表）。
+--     l-diversity 只做 distinct-l + entropy-l（recursive-(c,l) 未实现）；t-closeness 用
+--     TV(分类)/归一化 1-D EMD(有序) 而非完整 EMD；泛化损失为简化 ILA（无分类层级树时用组内离散度近似）。
+--     DP 机制假设 SQL 侧已完成真实聚合（本 lib 不查表）。
 --   【CN 合规脱敏规则库】（GB/T 37964 去标识化常用形态；格式保持 = 长度/位数不变，下游长度校验不炸）
 --   op='mask_cn'：p.v 待脱敏值、p.kind ∈ {'idcard','mobile','bankcard','name','email','generic','auto'}
 --     （默认 'auto'：按值自识别）、p.mode ∈ {'star','hash','birth'}：
@@ -210,7 +226,9 @@ local function common_prefix(strs)
   return p
 end
 
-local function kanon(p)
+-- 分组核心（kanon 与 kanon_report 共用）：返回 records, groups, k；
+-- 输入缺失时返回错误 JSON 字符串（第一返回值类型为 string，调用方透传）
+local function kanon_core(p)
   local records = p.records
   if type(records) ~= 'table' or #records == 0 then
     -- 并行数组模式（SQL 侧兼容）：{'op':'kanon', 'age':[25,26,60,61], 'city':['hz','hz','sh','sh'], 'k':2}
@@ -282,7 +300,13 @@ local function kanon(p)
     groups = next_groups
   end
 
-  -- 输出：每组泛化
+  return records, groups, k
+end
+
+-- k-匿名输出（保持既有返回格式不变：groups/suppressed/k）
+local function kanon(p)
+  local records, groups, k = kanon_core(p)
+  if type(records) == 'string' then return records end  -- 错误 JSON 透传
   local out_groups, suppressed = {}, 0
   for gi, g in ipairs(groups) do
     if #g < k then
@@ -304,6 +328,351 @@ local function kanon(p)
     out_groups[gi] = { size = #g, qi = qi_out, ids = ids }
   end
   return '{"groups":' .. json_encode(out_groups) .. ',"suppressed":' .. suppressed .. ',"k":' .. k .. '}'
+end
+
+-- ======================================================================
+-- kanon_report：l-diversity + t-closeness + 抑制率/泛化损失（GB/T 42460 效果评估要素）
+--   l：distinct-l（等价类内敏感值去重个数）与 entropy-l（香农熵，bits，判据 H ≥ log2(l)）
+--   t：分类 → 总变差 TV；有序/数值（p.ordered=true）→ 归一化 1-D EMD（=W1/值域跨度）
+--   泛化损失：数值 (max−min)/全局跨度；分类 1−1/(组内取值个数) —— 简化 ILA，按组大小加权
+-- ======================================================================
+
+-- 敏感值提取：records 模式的 r.sens，或 p.sensitive_field 指定的 qi 字段
+local function sens_value(r, p)
+  local v
+  if p.sensitive_field then v = r.qi[p.sensitive_field] else v = r.sens end
+  if v == nil then return nil end
+  return tostring(v)
+end
+
+local function build_dist(rows, p)
+  local d, n, miss = {}, 0, 0
+  for _, r in ipairs(rows) do
+    local v = sens_value(r, p)
+    if v == nil then miss = miss + 1 else d[v] = (d[v] or 0) + 1; n = n + 1 end
+  end
+  return d, n, miss
+end
+
+-- 香农熵（bits）
+local function entropy_bits(d, n)
+  if n <= 0 then return 0 end
+  local h = 0
+  local ln2 = math.log(2)
+  for _, c in pairs(d) do
+    local pr = c / n
+    h = h - pr * (math.log(pr) / ln2)
+  end
+  return h
+end
+
+-- 总变差距离 TV = ½Σ|p_i − q_i|（分类属性；两分布都归一化到 1）
+local function tv_distance(dg, ng, dq, nq)
+  if ng <= 0 or nq <= 0 then return 0 end
+  local keys = {}
+  for k in pairs(dg) do keys[k] = true end
+  for k in pairs(dq) do keys[k] = true end
+  local s = 0
+  for k in pairs(keys) do
+    s = s + math.abs((dg[k] or 0) / ng - (dq[k] or 0) / nq)
+  end
+  return s / 2
+end
+
+-- 归一化 1-D EMD（Wasserstein-1）：对两分布取值并集逐步长累加 CDF 差 × 间距，再除以值域跨度
+local function emd_1d(dg, ng, dq, nq)
+  if ng <= 0 or nq <= 0 then return 0 end
+  local u = {}
+  local numeric = true
+  for k in pairs(dg) do
+    local x = tonumber(k); if not x then numeric = false break end
+    u[#u + 1] = x
+  end
+  if numeric then
+    for k in pairs(dq) do
+      local x = tonumber(k); if not x then numeric = false break end
+      u[#u + 1] = x
+    end
+  end
+  if not numeric or #u < 2 then return nil end  -- 非数值 → 由调用方回退 TV
+  table.sort(u)
+  -- 去重
+  local vals = { u[1] }
+  for i = 2, #u do if u[i] ~= vals[#vals] then vals[#vals + 1] = u[i] end end
+  local span = vals[#vals] - vals[1]
+  if span <= 0 then return 0 end
+  local cum_g, cum_q, s = 0, 0, 0
+  for i = 1, #vals - 1 do
+    cum_g = cum_g + (dg[tostring(vals[i])] or 0) / ng
+    cum_q = cum_q + (dq[tostring(vals[i])] or 0) / nq
+    s = s + math.abs(cum_g - cum_q) * (vals[i + 1] - vals[i])
+  end
+  return s / span
+end
+
+-- 全局各 QI 维度跨度（用于数值泛化损失归一化）
+local function field_spans(rows)
+  local sp = {}
+  for _, r in ipairs(rows) do
+    for f, v in pairs(r.qi) do
+      if type(v) == 'number' then
+        local e = sp[f]
+        if not e then sp[f] = { min = v, max = v } else
+          if v < e.min then e.min = v end
+          if v > e.max then e.max = v end
+        end
+      end
+    end
+  end
+  return sp
+end
+
+-- 单组泛化损失（0 = 未泛化；1 = 完全泛化/无信息）
+local function group_ila(g, spans)
+  local sum, nf = 0, 0
+  for f, v0 in pairs(g[1].qi) do
+    nf = nf + 1
+    if type(v0) == 'number' then
+      local span = qi_max(g, f) - qi_min(g, f)
+      local gs = spans[f] and (spans[f].max - spans[f].min) or 0
+      sum = sum + (gs > 0 and (span / gs) or 0)
+    else
+      local seen, cnt = {}, 0
+      for _, r in ipairs(g) do
+        local s = tostring(r.qi[f])
+        if not seen[s] then seen[s] = true; cnt = cnt + 1 end
+      end
+      sum = sum + (cnt > 0 and (1 - 1 / cnt) or 0)
+    end
+  end
+  if nf == 0 then return 0 end
+  return sum / nf
+end
+
+local function kanon_report(p)
+  local records, groups, k = kanon_core(p)
+  if type(records) == 'string' then return records end
+  local n = #records
+  local l_req = tonumber(p.l) or 2
+  local t_req = tonumber(p.t) or 0.2
+  local gl_d, gl_n, gl_miss = build_dist(records, p)
+  local have_sens = gl_n > 0
+  local spans = field_spans(records)
+
+  local out_groups, suppressed, min_size = {}, 0, math.huge
+  local min_distinct_l, min_entropy_l, max_t = math.huge, math.huge, 0
+  local t_metric = 'tv'
+  local weighted_ila, pub_n = 0, 0
+
+  for gi, g in ipairs(groups) do
+    local qi_out = {}
+    for f, v0 in pairs(g[1].qi) do
+      if type(v0) == 'number' then
+        qi_out[f] = string.format('[%g,%g]', qi_min(g, f), qi_max(g, f))
+      else
+        local strs = {}
+        for _, r in ipairs(g) do strs[#strs + 1] = tostring(r.qi[f]) end
+        local pref = common_prefix(strs)
+        qi_out[f] = (pref ~= '' and pref or '*')
+      end
+    end
+    local ent = { size = #g, qi = qi_out }
+    local ids = {}
+    for _, r in ipairs(g) do ids[#ids + 1] = r.id or 0 end
+    ent.ids = ids
+    local dg, ng = build_dist(g, p)
+    local ila = group_ila(g, spans)
+    ent.ila = ila
+    if #g < k then
+      suppressed = suppressed + #g
+    else
+      if #g < min_size then min_size = #g end
+      pub_n = pub_n + #g
+      weighted_ila = weighted_ila + ila * #g
+      if have_sens and ng > 0 then
+        local dl = 0
+        for _ in pairs(dg) do dl = dl + 1 end
+        ent.distinct_l = dl
+        ent.entropy_l = entropy_bits(dg, ng)
+        if dl < min_distinct_l then min_distinct_l = dl end
+        if ent.entropy_l < min_entropy_l then min_entropy_l = ent.entropy_l end
+        local tv = tv_distance(dg, ng, gl_d, gl_n)
+        ent.t = tv
+        if p.ordered then
+          local e = emd_1d(dg, ng, gl_d, gl_n)
+          if e then ent.t = e; ent.t_metric = 'emd'; t_metric = 'emd' end
+        end
+        if ent.t > max_t then max_t = ent.t end
+      end
+    end
+    out_groups[gi] = ent
+  end
+
+  if min_size == math.huge then min_size = 0 end
+  local n_pub_groups = #groups - (function()
+    local c = 0
+    for _, g in ipairs(groups) do if #g < k then c = c + 1 end end
+    return c
+  end)()
+
+  local k_ok = suppressed == 0
+  local l_ok, t_ok = nil, nil
+  local violations = {}
+  if have_sens then
+    l_ok = (min_distinct_l ~= math.huge) and (min_distinct_l >= l_req)
+    -- entropy 判据：H ≥ log2(l)（等价类内熵下界）
+    local h_need = math.log(l_req) / math.log(2)
+    l_ok = l_ok and (min_entropy_l ~= math.huge) and (min_entropy_l + 1e-9 >= h_need)
+    t_ok = (max_t <= t_req + 1e-12)
+    if not l_ok then violations[#violations + 1] = 'l' end
+    if not t_ok then violations[#violations + 1] = 't' end
+  end
+  if not k_ok then violations[#violations + 1] = 'k' end
+  local pass = k_ok and (not have_sens or (l_ok and t_ok))
+
+  local rep = {
+    k = k, k_ok = k_ok,
+    n = n, groups = n_pub_groups,
+    suppressed = suppressed,
+    suppression_rate = n > 0 and (suppressed / n) or 0,
+    min_class_size = min_size,
+    generalization_loss = pub_n > 0 and (weighted_ila / pub_n) or 0,
+    total_generalization_loss = n > 0 and (weighted_ila / n) or 0,
+    verdict = pass and 'pass' or 'fail',
+    violations = violations,
+  }
+  if have_sens then
+    rep.l = l_req; rep.l_ok = l_ok
+    rep.min_distinct_l = (min_distinct_l == math.huge) and 0 or min_distinct_l
+    rep.min_entropy_l = (min_entropy_l == math.huge) and 0 or min_entropy_l
+    rep.t = t_req; rep.t_ok = t_ok
+    rep.max_t = max_t; rep.t_metric = t_metric
+    rep.sensitive_missing = gl_miss
+  end
+  return '{"report":' .. json_encode(rep) .. ',"groups":' .. json_encode(out_groups) .. '}'
+end
+
+-- ======================================================================
+-- ε 预算台账（dp_compose / dp_alloc / dp_budget）
+--   basic   顺序组合：ε_total = Σ ε_i（精确，无 δ）
+--   advanced 强组合（Dwork-Roth）：ε_total = Σ ε_i(e^{ε_i}−1) + √(2 ln(1/δ') Σ ε_i²)
+-- ======================================================================
+local function advanced_epsilon(list, delta)
+  local s1, s2 = 0, 0
+  for _, e in ipairs(list) do
+    s1 = s1 + e * (math.exp(e) - 1)
+    s2 = s2 + e * e
+  end
+  return s1 + math.sqrt(2 * math.log(1 / delta) * s2)
+end
+
+-- 从 p.epsilon / p.epsilons / p.count 组装 ε 列表
+local function eps_list(p)
+  local list = {}
+  if type(p.epsilons) == 'table' then
+    for _, e in ipairs(p.epsilons) do
+      if tonumber(e) then list[#list + 1] = tonumber(e) end
+    end
+  end
+  local one = tonumber(p.epsilon)
+  local cnt = math.floor(tonumber(p.count) or 0)
+  if one then
+    if #list == 0 and cnt > 0 then
+      for _ = 1, cnt do list[#list + 1] = one end
+    elseif cnt <= 0 then
+      list[#list + 1] = one
+    end
+  end
+  return list
+end
+
+local function list_sum(list)
+  local s = 0
+  for _, e in ipairs(list) do s = s + e end
+  return s
+end
+
+local function dp_compose(p)
+  local delta = tonumber(p.delta) or 1e-5
+  local list = eps_list(p)
+  if #list == 0 then return '{"error":"epsilon or epsilons required"}' end
+  local basic = list_sum(list)
+  local adv = advanced_epsilon(list, delta)
+  return string.format(
+    '{"n":%d,"delta":%g,"basic_total":%.9f,"advanced_total":%.9f,"saving_ratio":%.4f}',
+    #list, delta, basic, adv, basic > 0 and (adv / basic) or 0)
+end
+
+local function dp_alloc(p)
+  local budget = tonumber(p.budget) or 1.0
+  local n = math.floor(tonumber(p.n) or 0)
+  if n <= 0 then return '{"error":"n (query count) must be >= 1"}' end
+  local comp = p.composition or 'basic'
+  local delta = tonumber(p.delta) or 1e-5
+  local basic_per = budget / n
+  -- 高级组合：二分求最大均匀 ε 使强组合界 ≤ budget
+  local lo, hi = 0, budget
+  for _ = 1, 80 do
+    local mid = (lo + hi) / 2
+    local lst = {}
+    for _ = 1, n do lst[#lst + 1] = mid end
+    if advanced_epsilon(lst, delta) <= budget then lo = mid else hi = mid end
+  end
+  local adv_per = lo
+  -- per_query 按请求口径给出（默认 basic = 保守、无需 δ；advanced/auto 用强组合界）；best 报出更紧者
+  local per, best = basic_per, 'basic'
+  if comp == 'advanced' or comp == 'auto' then per = adv_per end
+  if adv_per > basic_per then best = 'advanced' end
+  local function bound_of(x)
+    if math.abs(x - basic_per) < 1e-15 then return x * n end  -- basic 口径即 Σε
+    local lst = {}
+    for _ = 1, n do lst[#lst + 1] = x end
+    return advanced_epsilon(lst, delta)
+  end
+  local rec = (best == 'advanced') and adv_per or basic_per
+  return string.format(
+    '{"budget":%g,"n":%d,"delta":%g,"requested_composition":"%s",'
+    .. '"per_query":%.9f,"total_bound":%.9f,"basic_per":%.9f,"advanced_per":%.9f,'
+    .. '"basic_total":%.9f,"advanced_total":%.9f,"best":"%s","recommended_per_query":%.9f}',
+    budget, n, delta, comp, per, bound_of(per), basic_per, adv_per, basic_per * n,
+    bound_of(adv_per), best, rec)
+end
+
+local function dp_budget(p)
+  local budget = tonumber(p.budget) or 1.0
+  local request = tonumber(p.request) or 0
+  local delta = tonumber(p.delta) or 1e-5
+  local comp = p.composition or 'basic'
+  local list, entries = {}, 0
+  if type(p.ledger) == 'table' then
+    for _, e in ipairs(p.ledger) do
+      local x
+      if type(e) == 'number' then x = e
+      elseif type(e) == 'table' then x = tonumber(e.epsilon) end
+      if x then list[#list + 1] = x; entries = entries + 1 end
+    end
+  end
+  local spent = tonumber(p.spent) or 0
+  local extra = spent - list_sum(list)   -- spent 里未被 ledger 覆盖的整块消耗
+  if extra > 1e-12 then list[#list + 1] = extra end
+  local before = list_sum(list)
+  local after_basic = before + request
+  local tot_before, tot_after = before, after_basic
+  if comp == 'advanced' then
+    tot_before = advanced_epsilon(list, delta)
+    local l2 = {}
+    for _, e in ipairs(list) do l2[#l2 + 1] = e end
+    l2[#l2 + 1] = request
+    tot_after = advanced_epsilon(l2, delta)
+  end
+  local allow = tot_after <= budget + 1e-12
+  return string.format(
+    '{"allow":%s,"composition":"%s","budget":%g,"request":%g,"delta":%g,"entries":%d,'
+    .. '"spent_before":%.9f,"spent_after":%.9f,"total_before":%.9f,"total_after":%.9f,'
+    .. '"remaining_before":%.9f,"remaining_after":%.9f,"reason":"%s"}',
+    allow and 'true' or 'false', comp, budget, request, delta, entries,
+    before, after_basic, tot_before, tot_after, budget - tot_before, budget - tot_after,
+    allow and 'ok' or 'budget_exceeded')
 end
 
 -- ======================================================================
@@ -554,6 +923,10 @@ local function run(p)
   elseif op == 'dateshift' then return dateshift(p)
   elseif op == 'dateoffset' then return dateoffset(p)
   elseif op == 'kanon' then return kanon(p)
+  elseif op == 'kanon_report' then return kanon_report(p)
+  elseif op == 'dp_compose' then return dp_compose(p)
+  elseif op == 'dp_alloc' then return dp_alloc(p)
+  elseif op == 'dp_budget' then return dp_budget(p)
   end
   return ''
 end

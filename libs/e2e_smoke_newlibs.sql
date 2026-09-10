@@ -32,3 +32,14 @@ SELECT luajit_s('privacy', {'op':'mask_cn', 'v':'13800138000'}) AS cn_mobile_aut
 SELECT luajit_s('privacy', {'op':'mask_cn', 'kind':'name', 'v':'欧阳锋'}) AS cn_name;
 SELECT luajit_s('privacy', {'op':'dateshift', 'v':'2150-03-04', 'key':'10001', 'days':180, 'with_delta':true}) AS shifted;
 SELECT luajit_s('privacy', {'op':'dateoffset', 'key':'10001', 'days':180}) AS offset_days;
+-- privacy :: P1 —— k/l/t 效果评估 + ε 预算台账（2026-09-10）
+SELECT luajit_s('privacy', {'op':'kanon_report',
+  'age':[25,26,60,61], 'city':['hz','hz','sh','sh'], 'disease':['A','B','A','A'],
+  'k':2, 'l':2, 't':0.2, 'sensitive_field':'disease'}) AS kanon_report;
+SELECT luajit_s('privacy', {'op':'kanon_report',
+  'age':[25,26,60,61], 'city':['hz','hz','sh','sh'], 'stage':[1,1,2,3],
+  'k':2, 'l':2, 't':0.4, 'ordered':true, 'sensitive_field':'stage'}) AS kanon_report_ordered;
+SELECT luajit_s('privacy', {'op':'dp_compose', 'epsilon':0.01, 'count':100, 'delta':1e-5}) AS compose;
+SELECT luajit_s('privacy', {'op':'dp_alloc', 'budget':1.0, 'n':100, 'delta':1e-5}) AS alloc;
+SELECT luajit_s('privacy', {'op':'dp_budget', 'budget':1.0, 'request':0.3,
+  'ledger':[{'epsilon':0.25},{'epsilon':0.25}]}) AS budget;

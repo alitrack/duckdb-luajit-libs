@@ -43,3 +43,8 @@ SELECT luajit_s('privacy', {'op':'dp_compose', 'epsilon':0.01, 'count':100, 'del
 SELECT luajit_s('privacy', {'op':'dp_alloc', 'budget':1.0, 'n':100, 'delta':1e-5}) AS alloc;
 SELECT luajit_s('privacy', {'op':'dp_budget', 'budget':1.0, 'request':0.3,
   'ledger':[{'epsilon':0.25},{'epsilon':0.25}]}) AS budget;
+-- privacy :: P2 —— 自由文本 PHI 脱敏 redact_text（2026-09-10）
+SELECT luajit_s('privacy', {'op':'redact_text', 'dict':['张三'],
+  'v':'患者张三，电话13800138000，身份证110101199003071234，邮箱zhang.san@hospital.org，入院2026-03-04'}) AS redact;
+SELECT luajit_s('privacy', {'op':'redact_text', 'key':'10001', 'days':180,
+  'v':'入院2026-03-04 随访2026/05/06'}) AS redact_shifted;

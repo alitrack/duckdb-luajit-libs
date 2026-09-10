@@ -222,3 +222,71 @@ WHERE json_extract_string(luajit_s('privacy', {'op':'dp_budget','budget':1.0,'re
         '$.allow') <> 'false'
    OR json_extract_string(luajit_s('privacy', {'op':'dp_budget','budget':1.0,'request':0.3,'ledger':arr}),
         '$.reason') <> 'budget_exceeded';
+
+-- ============================================================
+-- P2：redact_text 自由文本 PHI 脱敏（占位符式）
+-- ============================================================
+
+-- 断言 21：综合 —— 文本逐字 + total + 分类计数 + 模式标记
+WITH r AS (
+  SELECT luajit_s('privacy', {'op':'redact_text','v':'患者张三，电话13800138000，入院2026-03-04','dict':['张三']}) AS j
+)
+SELECT COUNT(*) AS p2_basic_must_be_0 FROM r
+WHERE json_extract_string(j, '$.text') <> '患者[**Name1**]，电话[**PHONE**]，入院[**DATE**]'
+   OR CAST(json_extract_string(j, '$.total') AS INT) <> 3
+   OR CAST(json_extract_string(j, '$.counts.name') AS INT) <> 1
+   OR CAST(json_extract_string(j, '$.counts.mobile') AS INT) <> 1
+   OR CAST(json_extract_string(j, '$.counts.date') AS INT) <> 1
+   OR json_extract_string(j, '$.date_mode') <> 'placeholder';
+
+-- 断言 22：零明文残留（原值一个都不许出现在输出里）
+WITH r AS (
+  SELECT luajit_s('privacy', {'op':'redact_text',
+    'v':'张三 13800138000 110101199003071234 zhang.san@hospital.org 10.0.0.7 2026-03-04','dict':['张三']}) AS j
+)
+SELECT COUNT(*) AS p2_no_residue_must_be_0 FROM r
+WHERE json_extract_string(j, '$.text') LIKE '%张三%'
+   OR json_extract_string(j, '$.text') LIKE '%13800138000%'
+   OR json_extract_string(j, '$.text') LIKE '%110101199003071234%'
+   OR json_extract_string(j, '$.text') LIKE '%hospital.org%'
+   OR json_extract_string(j, '$.text') LIKE '%10.0.0.7%'
+   OR json_extract_string(j, '$.text') LIKE '%2026-03-04%';
+
+-- 断言 23：字典编号按「字典顺序」⇒ 跨行稳定假名（张三缺席时李四仍是 Name2）
+SELECT COUNT(*) AS p2_dict_order_stable_must_be_0
+FROM (SELECT luajit_s('privacy', {'op':'redact_text','v':'只有李四在','dict':['张三','李四']}) AS j)
+WHERE json_extract_string(j, '$.text') <> '只有[**Name2**]在';
+
+-- 断言 24：幂等 —— 对已脱敏文本再跑一次，输出不变
+WITH a AS (
+  SELECT json_extract_string(luajit_s('privacy', {'op':'redact_text','v':'张三13800138000','dict':['张三']}), '$.text') AS t
+)
+SELECT COUNT(*) AS p2_idempotent_must_be_0 FROM a
+WHERE json_extract_string(luajit_s('privacy', {'op':'redact_text','v':t,'dict':['张三']}), '$.text') <> t;
+
+-- 断言 25：跨 op 一致性 —— redact_text 的日期平移 == dateshift（同一 key 同一时间轴）
+WITH x AS (
+  SELECT luajit_s('privacy', {'op':'redact_text','v':'入院2026-03-04','key':'10001','days':180}) AS j,
+         luajit_s('privacy', {'op':'dateshift','v':'2026-03-04','key':'10001','days':180}) AS d
+)
+SELECT COUNT(*) AS p2_shift_consistency_must_be_0 FROM x
+WHERE json_extract_string(j, '$.text') <> '入院' || d
+   OR json_extract_string(j, '$.date_mode') <> 'shift';
+
+-- 断言 26：长数字串阈值 + 短数字不动（num_min 默认 9）
+SELECT COUNT(*) AS p2_nummin_must_be_0
+FROM (SELECT json_extract_string(
+        luajit_s('privacy', {'op':'redact_text','v':'单号123456789 体温38 心率90'}), '$.text') AS t)
+WHERE t <> '单号[**NUM**] 体温38 心率90';
+
+-- 断言 27：非法日期/非法 IPv4 不误判（月 13、八位组 256 原样保留）
+SELECT COUNT(*) AS p2_false_positive_must_be_0
+FROM (SELECT json_extract_string(
+        luajit_s('privacy', {'op':'redact_text','v':'2026-13-04 与 256.0.0.1'}), '$.text') AS t)
+WHERE t <> '2026-13-04 与 256.0.0.1';
+
+-- 断言 28：诚实声明字段存在（规则驱动不假装全覆盖）
+SELECT COUNT(*) AS p2_note_missing_must_be_0
+FROM (SELECT luajit_s('privacy', {'op':'redact_text','v':'任意文本'}) AS j)
+WHERE json_extract_string(j, '$.note') IS NULL
+   OR json_extract_string(j, '$.note') NOT LIKE '%not guaranteed%';

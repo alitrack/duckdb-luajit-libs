@@ -57,6 +57,20 @@
 --     → 同 subject 各行偏移恒定 ⇒ 住院第几天/两事件间隔等相对时间逐位不变；
 --     p.key 缺省 = ''（全局单一偏移，仍不可反推绝对日期）。非法日期返回 'null'。
 --   op='dateoffset'：只返回该 key 的偏移天数（整数），供数据字典 / 审计登记。
+--   【自由文本 PHI 脱敏】（占位符式，MIMIC `[**Name1**]` 风格；纯规则、可审计）
+--   op='redact_text'：p.v 自由文本、p.dict 字典词数组（姓名等，无法凭模式识别）、
+--     p.num_min 未分类长数字串阈值（默认 9 位，≥ 则按 [**NUM**] 掩掉）、
+--     p.key（可选）+ p.salt（默认 'dateshift'）+ p.days（默认 180）：
+--       给了 key → 日期不置占位符而是**按 dateshift 同款偏移平移**（同 key 与结构化列一致）
+--       未给 key → 日期置 [**DATE**] 占位符
+--     → 返回 JSON：{ text 脱敏后文本, total 命中数, counts 分类计数, map 字典词→占位符,
+--       date_mode, num_min, chars_in, note }。同一原文 → 同一占位符；字典编号按
+--       **字典顺序**（不是行内首现序）⇒ 同一字典跑多行文本时，同一人恒得同一编号，
+--       跨行可直接对齐（稳定假名）；`map` 返回的是字典全量映射。
+--     内置模式：邮箱 / URL / IPv4 / 日期（-、/、.、年月日 四形态，校验月日合法）/
+--       身份证（15、18、17+X）/ 手机（1[3-9] + 9 位）/ 银行卡（16–19 位）/ 未分类长数字串。
+--     诚实边界：只覆盖规则表列出的模式 + 所给字典，**未匹配的自由文本不保证无 PHI**
+--     （note 字段里显式声明，不假装全覆盖）。
 --
 -- Usage (duckdb-luajit, scalar mode):
 --   install:  SELECT * FROM luajit_module(mode:='install', sql_name:='privacy');
@@ -869,6 +883,210 @@ local function dateoffset(p)
 end
 
 -- ======================================================================
+-- 自由文本 PHI 脱敏（redact_text）—— 占位符式（MIMIC `[**Name1**]` 风格）
+--   规则=数据（表驱动，可审计）：① 调用方字典（姓名等无法凭模式识别的词）
+--   ② 内置模式规则：邮箱/URL/IPv4/日期/身份证/手机/银行卡
+--   ③ 保守兜底：未分类的长数字串（≥ num_min 位）按 [**NUM**] 掩掉
+--   同一原文 → 同一占位符（编号按首现顺序），便于对读与回溯对齐。
+--   p.key 提供时日期不置占位符而是按 dateshift 同款 key 偏移
+--   （默认 salt 同为 'dateshift' ⇒ 与结构化列 dateshift 结果一致，跨列跨文本同一时间轴）。
+--   诚实边界：规则驱动只覆盖「规则表列出的模式 + 所给字典」，
+--   未匹配的自由文本不保证无 PHI —— 输出里显式带 note 声明，不假装全覆盖。
+-- ======================================================================
+local REDACT_PH = {
+  email = '[**EMAIL**]', url = '[**URL**]', ipv4 = '[**IP**]',
+  date = '[**DATE**]', idcard = '[**ID**]', mobile = '[**PHONE**]',
+  bankcard = '[**ACCT**]', longnum = '[**NUM**]',
+}
+
+-- 日期书写形态：pat 为带捕获的 Lua 模式（Lua 无 {n} 量词也无交替 → 逐形态列举）
+-- 月/日用 %d%d? 容忍 1 位写法（如 2026年3月4日、2026-3-4）
+local REDACT_DATE_FORMS = {
+  { pat = '(%d%d%d%d)%-(%d%d?)%-(%d%d?)', sep = '-' },
+  { pat = '(%d%d%d%d)/(%d%d?)/(%d%d?)',   sep = '/' },
+  { pat = '(%d%d%d%d)%.(%d%d?)%.(%d%d?)', sep = '.' },
+  { pat = '(%d%d%d%d)年(%d%d?)月(%d%d?)日', sep = 'cn' },
+}
+
+local function redact_valid_ymd(y, m, d)
+  y, m, d = tonumber(y), tonumber(m), tonumber(d)
+  if not (y and m and d) then return false end
+  return m >= 1 and m <= 12 and d >= 1 and d <= 31
+end
+
+local function redact_valid_ipv4(t)
+  local n = 0
+  for oct in t:gmatch('%d+') do
+    n = n + 1
+    local v = tonumber(oct)
+    if v > 255 or (#oct > 1 and oct:sub(1, 1) == '0') then return false end
+  end
+  return n == 4
+end
+
+-- 先到先得：与已占区间重叠的候选直接丢弃（= 规则优先级）
+local function redact_free(marks, s0, e0)
+  for i = 1, #marks do
+    local m = marks[i]
+    if not (e0 < m.s or s0 > m.e) then return false end
+  end
+  return true
+end
+
+local function redact_add_pattern(marks, s, pat, id)
+  local pos = 1
+  while true do
+    local s0, e0 = s:find(pat, pos)
+    if not s0 then break end
+    if redact_free(marks, s0, e0) then
+      marks[#marks + 1] = { s = s0, e = e0, id = id, ph = REDACT_PH[id] }
+    end
+    pos = e0 + 1
+  end
+end
+
+-- 日期：逐形态匹配 + 月/日合法性校验（避免把 1234-56-78 当日期）
+local function redact_add_dates(marks, s)
+  for _, f in ipairs(REDACT_DATE_FORMS) do
+    local pos = 1
+    while true do
+      local s0, e0, y, m, d = s:find(f.pat, pos)
+      if not s0 then break end
+      if redact_valid_ymd(y, m, d) and redact_free(marks, s0, e0) then
+        marks[#marks + 1] = { s = s0, e = e0, id = 'date', ph = REDACT_PH.date, sep = f.sep }
+      end
+      pos = e0 + 1
+    end
+  end
+end
+
+-- 数字串：按长度/前缀分类（与 mask_cn 的 cn_detect 同口径），未分类的长串走保守兜底
+local function redact_add_digit_runs(marks, s, num_min)
+  local pos = 1
+  while true do
+    local s0, e0 = s:find('%d+', pos)
+    if not s0 then break end
+    local run = s:sub(s0, e0)
+    local n = #run
+    local nx = s:sub(e0 + 1, e0 + 1)
+    local id = nil
+    if n == 17 and nx:match('[Xx]') then          -- 18 位身份证末位 X
+      e0 = e0 + 1
+      id = 'idcard'
+    elseif n == 18 or n == 15 then
+      id = 'idcard'
+    elseif n == 11 and run:sub(1, 1) == '1' and run:sub(2, 2):match('[3-9]') then
+      id = 'mobile'
+    elseif n >= 16 and n <= 19 then
+      id = 'bankcard'
+    elseif n >= num_min then
+      id = 'longnum'
+    end
+    if id and redact_free(marks, s0, e0) then
+      marks[#marks + 1] = { s = s0, e = e0, id = id, ph = REDACT_PH[id] }
+    end
+    pos = e0 + 1
+  end
+end
+
+-- 字典词：字面查找（非模式），同原文共用同一编号
+local function redact_add_dict(marks, s, dict, map, order)
+  for _, w in ipairs(dict or {}) do
+    local nm = tostring(w)
+    if nm ~= '' then
+      if not map[nm] then
+        order[#order + 1] = nm
+        map[nm] = '[**Name' .. #order .. '**]'
+      end
+      local pos = 1
+      while true do
+        local s0, e0 = s:find(nm, pos, true)
+        if not s0 then break end
+        if redact_free(marks, s0, e0) then
+          marks[#marks + 1] = { s = s0, e = e0, id = 'name', ph = map[nm] }
+        end
+        pos = e0 + 1
+      end
+    end
+  end
+end
+
+-- 日期平移（与 op='dateshift' 同款算法与默认盐 ⇒ 同 key 结果一致）
+local function redact_shift_date(txt, sep, key, salt, days)
+  local y, m, d
+  if sep == 'cn' then
+    y, m, d = txt:match('^(%d%d%d%d)年(%d%d?)月(%d%d?)日$')
+  elseif sep == '-' then
+    y, m, d = txt:match('^(%d%d%d%d)%-(%d%d?)%-(%d%d?)$')
+  elseif sep == '/' then
+    y, m, d = txt:match('^(%d%d%d%d)/(%d%d?)/(%d%d?)$')
+  else
+    y, m, d = txt:match('^(%d%d%d%d)%.(%d%d?)%.(%d%d?)$')
+  end
+  if not y then return nil end
+  local off = days == 0 and 0 or key_offset(key, salt, days)
+  local ny, nm, nd = civil_from_days(days_from_civil(tonumber(y), tonumber(m), tonumber(d)) + off)
+  if sep == 'cn' then return string.format('%04d年%02d月%02d日', ny, nm, nd) end
+  return string.format('%04d%s%02d%s%02d', ny, sep, nm, sep, nd)
+end
+
+local function redact_text(p)
+  local s = tostring(p.v or '')
+  local marks, map, order = {}, {}, {}
+  local num_min = math.floor(tonumber(p.num_min) or 9)
+  if num_min < 1 then num_min = 1 end
+  local days = math.floor(math.abs(tonumber(p.days) or 180))
+  local shift = p.key ~= nil and p.key ~= '' or false
+  local salt = p.salt or 'dateshift'
+
+  -- 优先级：结构化模式（邮箱/URL/IP/日期 —— 占位符最具体、整体覆盖）→ 字典 → 数字串
+  redact_add_pattern(marks, s, '[%w%.%-_%+]+@[%w%.%-]+%.[%a][%a]+', 'email')
+  redact_add_pattern(marks, s, 'https?://[%w%.%-_/%?=&#:~%%%+]+', 'url')
+  do
+    local pos = 1
+    while true do
+      local s0, e0 = s:find('%d+%.%d+%.%d+%.%d+', pos)
+      if not s0 then break end
+      if redact_valid_ipv4(s:sub(s0, e0)) and redact_free(marks, s0, e0) then
+        marks[#marks + 1] = { s = s0, e = e0, id = 'ipv4', ph = REDACT_PH.ipv4 }
+      end
+      pos = e0 + 1
+    end
+  end
+  redact_add_dates(marks, s)
+  -- 字典在数字串之前：字典词可能自带数字（如住院号 MRN123456789），整词命中优先于按数字串切
+  redact_add_dict(marks, s, p.dict, map, order)
+  redact_add_digit_runs(marks, s, num_min)
+
+  -- 重建：按位置排序后拼接（重叠已在采集阶段排除）
+  table.sort(marks, function(a, b) return a.s < b.s end)
+  local out, cur = {}, 1
+  for _, m in ipairs(marks) do
+    if m.s > cur then out[#out + 1] = s:sub(cur, m.s - 1) end
+    local rep = m.ph
+    if m.id == 'date' and shift then
+      rep = redact_shift_date(s:sub(m.s, m.e), m.sep, p.key, salt, days) or m.ph
+    end
+    out[#out + 1] = rep
+    cur = m.e + 1
+  end
+  if cur <= #s then out[#out + 1] = s:sub(cur) end
+
+  local counts = {}
+  for _, m in ipairs(marks) do counts[m.id] = (counts[m.id] or 0) + 1 end
+  return json_encode({
+    text = table.concat(out),
+    total = #marks,
+    counts = counts,
+    map = map,
+    date_mode = shift and 'shift' or 'placeholder',
+    num_min = num_min,
+    chars_in = #s,
+    note = 'rule-based: covers listed patterns + given dict only; unmatched free text is not guaranteed PHI-free',
+  })
+end
+
+-- ======================================================================
 -- 内联 JSON 编码器（零外部依赖）
 -- ======================================================================
 local function esc_str(s)
@@ -922,6 +1140,7 @@ local function run(p)
   elseif op == 'mask_cn' then return mask_cn(p)
   elseif op == 'dateshift' then return dateshift(p)
   elseif op == 'dateoffset' then return dateoffset(p)
+  elseif op == 'redact_text' then return redact_text(p)
   elseif op == 'kanon' then return kanon(p)
   elseif op == 'kanon_report' then return kanon_report(p)
   elseif op == 'dp_compose' then return dp_compose(p)

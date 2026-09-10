@@ -301,5 +301,77 @@ local kmissing = f({records = {}, k = 2, op = 'kanon'})
 check('kanon 缺输入沿用旧错误 JSON', kmissing, '{"error":"records required"}')
 check('kanon_report 缺输入同错误', f({records = {}, k = 2, op = 'kanon_report'}), '{"error":"records required"}')
 
+-- ======================================================================
+-- P2 锚（redact_text 自由文本 PHI 脱敏）
+-- ======================================================================
+local function jtext(s) return s:match('"text":"([^"]*)"') end
+
+-- 锚 19: 综合（模式 + 字典）
+local rt1 = f({op = 'redact_text', dict = {'张三'},
+  v = '患者张三，电话13800138000，身份证110101199003071234，邮箱zhang.san@hospital.org，入院2026-03-04'})
+check('P2 综合 text', jtext(rt1), '患者[**Name1**]，电话[**PHONE**]，身份证[**ID**]，邮箱[**EMAIL**]，入院[**DATE**]')
+check('P2 综合 total', jnum(rt1, 'total'), 5)
+check('P2 命中姓名', jnum(rt1, 'name'), 1)
+check('P2 日期默认 placeholder 模式', jget(rt1, 'date_mode'), 'placeholder')
+ok('P2 带诚实声明 note', (jget(rt1, 'note') or ''):match('not guaranteed') ~= nil)
+ok('P2 无明文残留', jtext(rt1):match('13800138000') == nil and jtext(rt1):match('张三') == nil
+  and jtext(rt1):match('110101199003071234') == nil)
+
+-- 锚 20: 同原文 → 同占位符（可对齐）
+local rt2 = f({op = 'redact_text', v = '张三说张三又来了', dict = {'张三'}})
+check('P2 同名复用同编号', jtext(rt2), '[**Name1**]说[**Name1**]又来了')
+check('P2 同名命中 2 次', jnum(rt2, 'name'), 2)
+
+-- 锚 21: 字典编号按「字典顺序」（跨行稳定假名：同一字典跑多行，同一人恒同编号）
+local rta = f({op = 'redact_text', v = '只有李四在', dict = {'张三', '李四'}})
+check('P2 字典顺序编号（李四=Name2 即便张三缺席）', jtext(rta), '只有[**Name2**]在')
+
+-- 锚 22: 幂等（占位符不会被二次脱敏）
+local rt3 = f({op = 'redact_text', v = jtext(rt1), dict = {'张三'}})
+check('P2 幂等', jtext(rt3), jtext(rt1))
+
+-- 锚 23: 日期平移与 op='dateshift' 逐字一致（跨结构化列/自由文本同一时间轴）
+local rt4 = f({op = 'redact_text', v = '入院2026-03-04', dict = {}, key = '10001', days = 180})
+local ds4 = f({op = 'dateshift', v = '2026-03-04', key = '10001', days = 180})
+check('P2 给了 key → date_mode=shift', jget(rt4, 'date_mode'), 'shift')
+check('P2 日期平移 == dateshift', jtext(rt4), '入院' .. ds4)
+
+-- 锚 24: 证件类（15 / 18 / 17+X）
+check('P2 身份证18位', jtext(f({op = 'redact_text', v = '110101199003071234', dict = {}})), '[**ID**]')
+check('P2 身份证15位', jtext(f({op = 'redact_text', v = '110101900307123', dict = {}})), '[**ID**]')
+check('P2 身份证末位X', jtext(f({op = 'redact_text', v = '11010119900307123X', dict = {}})), '[**ID**]')
+check('P2 手机号', jtext(f({op = 'redact_text', v = '15912345678', dict = {}})), '[**PHONE**]')
+check('P2 银行卡16位', jtext(f({op = 'redact_text', v = '6222021234567890', dict = {}})), '[**ACCT**]')
+check('P2 银行卡19位', jtext(f({op = 'redact_text', v = '6222021234567890123', dict = {}})), '[**ACCT**]')
+
+-- 锚 25: 邮箱 / URL / IPv4（非法 IPv4 不误判）
+check('P2 邮箱', jtext(f({op = 'redact_text', v = 'a1+b2@x.co', dict = {}})), '[**EMAIL**]')
+check('P2 URL', jtext(f({op = 'redact_text', v = '见 https://x.org/a?b=1', dict = {}})), '见 [**URL**]')
+check('P2 IPv4', jtext(f({op = 'redact_text', v = '10.0.0.7', dict = {}})), '[**IP**]')
+check('P2 非法IPv4(999)不掩', jtext(f({op = 'redact_text', v = '999.1.1.1', dict = {}})), '999.1.1.1')
+check('P2 非法IPv4(256)不掩', jtext(f({op = 'redact_text', v = '256.0.0.1', dict = {}})), '256.0.0.1')
+
+-- 锚 26: 日期四形态 + 月日合法性校验
+check('P2 日期 - 形态', jtext(f({op = 'redact_text', v = '2026-3-4', dict = {}})), '[**DATE**]')
+check('P2 日期 / 形态', jtext(f({op = 'redact_text', v = '2026/05/06', dict = {}})), '[**DATE**]')
+check('P2 日期 . 形态', jtext(f({op = 'redact_text', v = '2026.7.8', dict = {}})), '[**DATE**]')
+check('P2 日期 年月日 形态（1 位月日）', jtext(f({op = 'redact_text', v = '2026年3月4日', dict = {}})), '[**DATE**]')
+check('P2 非法月(13)不掩', jtext(f({op = 'redact_text', v = '2026-13-04', dict = {}})), '2026-13-04')
+check('P2 非法日(45)不掩', jtext(f({op = 'redact_text', v = '2026-03-45', dict = {}})), '2026-03-45')
+
+-- 锚 27: 长数字串阈值 + 短数字不动
+check('P2 9 位长串掩', jtext(f({op = 'redact_text', v = '123456789', dict = {}})), '[**NUM**]')
+check('P2 8 位不动', jtext(f({op = 'redact_text', v = '12345678', dict = {}})), '12345678')
+check('P2 num_min 可调（8 位也掩）', jtext(f({op = 'redact_text', v = '12345678', dict = {}, num_min = 8})), '[**NUM**]')
+check('P2 短数字不动', jtext(f({op = 'redact_text', v = '体温 38 心率 90', dict = {}})), '体温 38 心率 90')
+
+-- 锚 28: 优先级 —— 邮箱整体优先于字典局部命中
+check('P2 邮箱优先于字典', jtext(f({op = 'redact_text', v = 'zhangsan@x.com', dict = {'zhangsan'}})), '[**EMAIL**]')
+
+-- 锚 29: 无命中 → 原文不变；空输入
+check('P2 无命中原文不变', jtext(f({op = 'redact_text', v = '患者诉头痛，无发热。', dict = {'张三'}})), '患者诉头痛，无发热。')
+check('P2 空输入 total=0', jnum(f({op = 'redact_text', v = '', dict = {}}), 'total'), 0)
+check('P2 chars_in 为原字节数', jnum(f({op = 'redact_text', v = 'abcdef', dict = {}}), 'chars_in'), 6)
+
 print(string.format("\nRESULT: %d passed, %d failed", passed, failed))
 os.exit(failed == 0 and 0 or 1)

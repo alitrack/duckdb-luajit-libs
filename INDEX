@@ -43,3 +43,4 @@ psi|libs/quality/psi.lua
 entity|libs/entity/entity.lua
 privacy|libs/privacy/privacy.lua
 dbcli|libs/db/dbcli.lua
+usql|libs/db/usql.lua

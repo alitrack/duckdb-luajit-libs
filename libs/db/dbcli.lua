@@ -18,8 +18,8 @@
 --   kind    json（默认：解析为数组，每个对象一行，原样输出）| tsv（每个 tab 行一行）| raw（每个输出行一行）
 --   op      query（默认）| exec（只取最后一行/计数）| ping（只验证客户端可执行）
 --
--- usql（https://github.com/xo/usql，`-tags most` 构建）一条 client 覆盖 ~45 种数据库：
---   sqlite3/postgres/mysql/clickhouse/redis?/snowflake/bigquery/databricks/
+-- usql（https://github.com/xo/usql，`-tags most` 构建）一条 client 覆盖 40+ 种数据库（drivers/ 45 目录，含同库多绑定；SQL 库，不含 redis/mongo）：
+--   sqlite3/postgres/mysql/clickhouse/snowflake/bigquery/databricks/
 --   cassandra/couchbase/cosmos/dynamodb/firebird/ignite/maxcompute/mssql/oracle/
 --   presto/trino/vertica/h2/voltdb/ydb/... 详见 usql drivers/ 目录。
 --   用法：client="usql", args=["-q","-J","<scheme>://<dsn>"]。

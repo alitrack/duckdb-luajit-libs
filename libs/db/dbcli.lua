@@ -11,11 +11,19 @@
 --   {"client":"sqlite3","args":["/tmp/x.db"],"sql":"PRAGMA table_info(t)","op":"exec"}
 --
 -- 字段：
---   client  可执行文件名（sqlite3/psql/mysql/mongosh/redis-cli/clickhouse-client/任意）
---   args    参数数组（或空格分隔字符串）
---   sql     要执行的语句（sqlite3 走命令行第三参，其它走 stdin 临时文件）
+--   client  可执行文件名（sqlite3/psql/mysql/redis-cli/usql/任意）
+--   args    参数数组（或空格分隔字符串）。usql: 放 -q -J 等开关 + DSN，如
+--           ["-q","-J","sqlite3:///path/to/x.db"]（DSN 是最后一个位置参数）
+--   sql     要执行的语句（走 stdin 临时文件；usql 会自动补尾分号）
 --   kind    json（默认：解析为数组，每个对象一行，原样输出）| tsv（每个 tab 行一行）| raw（每个输出行一行）
 --   op      query（默认）| exec（只取最后一行/计数）| ping（只验证客户端可执行）
+--
+-- usql（https://github.com/xo/usql，`-tags most` 构建）一条 client 覆盖 ~45 种数据库：
+--   sqlite3/postgres/mysql/clickhouse/redis?/snowflake/bigquery/databricks/
+--   cassandra/couchbase/cosmos/dynamodb/firebird/ignite/maxcompute/mssql/oracle/
+--   presto/trino/vertica/h2/voltdb/ydb/... 详见 usql drivers/ 目录。
+--   用法：client="usql", args=["-q","-J","<scheme>://<dsn>"]。
+--   注意：usql sqlite3 DSN 会自动创建空库（查"不存在"的库不会报错，会建 0 字节文件）。
 --
 -- 输出行：单列行（表函数 row_idx|val 中的 val）。json kind 下行 = 客户端输出的 JSON 对象字符串
 --（SQL 侧可用 json 库或 regexp 提取）；tsv/raw kind 下行 = 原始文本（'|' 已转义为 '¦'）。
@@ -109,7 +117,16 @@ local function query(t)
   if not w then
     return nil, 'cannot write stdin tmp file ' .. tmp
   end
-  w:write(t.sql)
+  -- usql quirk: statements fed via stdin MUST be terminated with ';'
+  -- otherwise it silently returns empty output (-c form does not need this).
+  -- Match by basename (client may be a full path like /opt/bin/usql_most).
+  local client_base = t.client:match('[^/\\]+$') or ''
+  local is_usql = client_base:match('^usql') ~= nil
+  local sql_text = t.sql
+  if is_usql and not sql_text:match('%;%s*$') then
+    sql_text = sql_text .. ';'
+  end
+  w:write(sql_text)
   w:close()
   out = run_read(cmd .. ' < ' .. tmp .. ' 2>&1')
   os.remove(tmp)

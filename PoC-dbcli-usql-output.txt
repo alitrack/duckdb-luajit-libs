@@ -1,0 +1,9 @@
+# PoC-dbcli-usql-output.txt — dbcli.lua 驱动 usql(most,45驱动) 查库
+# 生成: 2026-09-11T07:36:11Z
+# 前置: usql_most = CGO_ENABLED=1 go build -tags most（45 数据库驱动）
+# 命令: duckdb -unsigned -f libs/db/test_dbcli_usql.sql
+# 关键坑: usql stdin 喂 SQL 必须带尾分号否则静默空输出; client 为完整路径时按 basename 识别 usql
+
+IO Error: Extension "\mnt\d\wsl2\luajit\build\release\luajit.duckdb_extension" not found.
+
+Candidate extensions: "ui", "md", "aws", "fts", "delta"

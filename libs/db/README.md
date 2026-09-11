@@ -7,7 +7,8 @@
 
 ## 文件
 - `dbcli.lua` — 核心表函数。一个通用 client 抽象，可指向任意可执行文件（**每查询拉子进程**）。
-- `usql.lua` — in-process 表函数。FFI 加载 `usql-bridge`（Go c-shared，内嵌 usql 的 `database/sql` 驱动），**连接常驻无进程冷启**，工件按平台自动选名（linux/darwin/windows × amd64/arm64），从独立仓 `alitrack/usql-bridge` 的 release v0.1.1 解析。
+- `usql.lua` — in-process 表函数。FFI 加载 `usql-bridge`（Go c-shared，内嵌 usql 的 `database/sql` 驱动），**连接常驻无进程冷启**，工件按平台自动选名（linux/darwin/windows × amd64/arm64），从独立仓 `alitrack/usql-bridge` 的 release v0.2.0 解析。
+- `op=export`（v0.2.0）——**列式直出 Parquet**：按 driver 声明的列类型建 schema，类型和字节原样（DATE 是 DATE、BOOLEAN 是 BOOLEAN、BLOB 字节精确），返回值是文件路径，可直接 `read_parquet(usql('{"op":"export",...}'))`，不用 DuckDB 侧 `from_json` 展开。10 万行 × 10 列实测：0.38–0.40s / 2.35MB 文件，对比 JSON 路径 0.70–0.76s / 19.2MB 文本。不写 `path` 落系统临时目录并在 close 时清理。代价：工件 10.7MB → 20.8MB。
 - `test_dbcli.sql` — sqlite3 全链路测试（建库/插数/查询/聚合/错误可见化）。
 - `test_dbcli_install.sql` — 真实用户链路：`install` 远程拉取后查库。
 - `test_dbcli_usql.sql` — usql 集成：一个二进制查 40+ 种库的 DSN。

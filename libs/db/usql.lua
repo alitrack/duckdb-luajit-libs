@@ -23,11 +23,22 @@
 -- 形态：表函数（luajit_table）。list 参数 = JSON 规格字符串（扁平对象，内联解析）：
 --   {"op":"connect","url":"moderncsqlite:////tmp/x.db"}   -- 连接，返回一行（id=N 或 ERR: ...）
 --   {"op":"query","id":1,"sql":"SELECT 1 AS a"}            -- 查询，每行 = 一个 JSON 对象
+--   {"op":"export","id":1,"sql":"SELECT ...","format":"parquet",
+--    "path":"<可选>","compression":"snappy|none"}           -- 列式导出，返回 Parquet 文件路径
 --   {"op":"exec","id":1,"sql":"INSERT INTO t VALUES (1)"}  -- 写，返回 OK rows=N
 --   {"op":"close","id":1}                                  -- 关闭
 --   {"op":"benchmark","id":1,"n":100,"sql":"SELECT 1"}     -- 持续查询基准
 -- 连接 id 在同一 DuckDB 进程内跨调用持久（Go 侧 map[int]*sql.DB，Ping 冷启前置到 connect）。
 -- 错误行：'ERR: <reason>'。
+--
+-- export（v0.2.0 起）：走列式，不走 JSON。JSON 只有 number/string/bool/null，类型得靠
+-- DuckDB 侧 from_json 推断（DATE/DATETIME→VARCHAR、BOOLEAN→整数、DECIMAL→DOUBLE），
+-- 且文本化会把 BLOB 的非 UTF-8 字节变成 U+FFFD（不可逆）。export 按 driver 声明的类型
+-- 建 Parquet schema，字节和类型原样过，DuckDB 侧 read_parquet 零解析：
+--   SELECT * FROM read_parquet(luajit_vs('usql', '{"op":"export","id":1,"sql":"SELECT ..."}'));
+-- 10 万行 x 10 列实测：导出 11ms / 6.9MB（JSON 路径同数据 267ms / 18.6MB）。
+-- 不写 path 时落系统临时目录，连接 close 时自动清理；写了 path 就不动它。
+-- 注意：export 的返回值是文件路径，不做 escrow（路径必须原样）。
 --
 -- scheme（usql 驱动注册名）：moderncsqlite（纯 Go SQLite，当前 release 默认）；
 -- 需要 postgres/mysql 等：在 usql-bridge 的 main.go import 对应 drivers/<scheme> 后重新发布 .so。
@@ -43,11 +54,12 @@ ffi.cdef[[
   extern char* usql_connect(const char* url);
   extern char* usql_query(int id, const char* query);
   extern char* usql_exec(int id, const char* query);
+  extern char* usql_export(const char* spec);
   extern int   usql_close(int id);
   extern void free(void* ptr);
 ]]
 
-local REL_TAG = 'v0.1.1'
+local REL_TAG = 'v0.2.0'
 local IS_WIN = (jit and jit.os == 'Windows')
 
 -- 平台 -> 工件名。LuaJIT 的 jit.os: Linux / OSX / Windows；jit.arch: x64 / arm64。
@@ -220,7 +232,7 @@ local function escrow(s)
   return (s:gsub('|', '¦'):gsub('\n', ' '))
 end
 
-local function run(t)
+local function run(t, raw)
   local okl, lerr = loadlib(t.lib)
   if not okl then return { 'ERR: ' .. lerr } end
   lib = okl
@@ -232,6 +244,12 @@ local function run(t)
   elseif op == 'close' then
     if not t.id then return { 'ERR: close needs id' } end
     return { 'closed=' .. tostring(lib.usql_close(t.id)) }
+  elseif op == 'export' then
+    if not t.id then return { 'ERR: export needs id (call connect first)' } end
+    if not t.sql then return { 'ERR: export needs sql' } end
+    -- 整个 spec 原样交给 Go 侧解析（路径里的转义交给 encoding/json，Lua 侧不碰）；
+    -- 返回值是文件路径，必须原样——不能 escrow。
+    return { free_ret(lib.usql_export(raw)) }
   elseif op == 'exec' or op == 'query' or op == 'benchmark' then
     if not t.id then return { 'ERR: ' .. op .. ' needs id (call connect first)' } end
     if not t.sql then return { 'ERR: ' .. op .. ' needs sql' } end
@@ -252,7 +270,30 @@ local function run(t)
   return { 'ERR: unknown op ' .. tostring(op) }
 end
 
+-- 单个 spec -> 单个结果字符串（批形态用）。错误也以 'ERR: ...' 文本回。
+local function call_one(spec)
+  if not spec or spec == '' then
+    return 'ERR: usql needs a JSON spec in list (op/url/id/sql, see @desc)'
+  end
+  local ok, t = pcall(parse_spec, spec)
+  if not ok or type(t) ~= 'table' or not next(t) then
+    return 'ERR: bad JSON spec: ' .. escrow(tostring(t))
+  end
+  local out = run(t, spec)
+  return out[1] or ''
+end
+
+-- 调用形态（同一个库文件两种入口）：
+--   luajit_table('usql', list := '<spec>')  -> 传进来是**字符串**：返回行表（每行一列）
+--   luajit_vs('usql', '<spec>') / usql('<spec>') 宏 -> 传进来是**表** {s1..sn}（按 chunk 批）：
+--                                              要返回同长度的字符串表
+-- 我们每行只有一列，两种形态的结果形状一致（一个字符串数组）。
 return function(list)
+  if type(list) == 'table' then
+    local out = {}
+    for i = 1, #list do out[i] = call_one(list[i]) end
+    return out
+  end
   if not list or list == '' then
     return { 'ERR: usql needs a JSON spec in list (op/url/id/sql, see @desc)' }
   end
@@ -260,5 +301,5 @@ return function(list)
   if not ok or type(t) ~= 'table' or not next(t) then
     return { 'ERR: bad JSON spec: ' .. escrow(tostring(t)) }
   end
-  return run(t)
+  return run(t, list)
 end

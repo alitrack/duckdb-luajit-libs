@@ -2,15 +2,23 @@
 -- @category: db
 -- @desc: in-process 数据库 transport：Lua 进程内加载 usql-bridge（Go c-shared，内嵌 xo/usql 的 database/sql 驱动），连接常驻、多次查询无进程冷启。与 dbcli+usql 二进制互补：那条路要用户机器装 usql 二进制、每查询拉进程（30-100ms 冷启）；本库零外部二进制，实测持续查询 ~0.2ms/次（PoC 口径，SQLite）。
 -- @source: alitrack/usql-bridge（Go 桥，MIT）+ 本 FFI 桥（original）
--- @requires: luajit FFI 可用（默认非 trusted 模式）；usqlbridge-linux-amd64.so（自动解析，见下）
+-- @requires: luajit FFI 可用（默认非 trusted 模式）；usql-bridge 工件（按平台自动解析，见下）
 -- 自包含：spec 用内联极简 JSON 解析（扁平 string+number 对象），不依赖 labs 的 json 库。
 --
--- .so 解析顺序（bootstrap）：
+-- 工件按平台选名（usql-bridge release v0.1.1 起覆盖全平台）：
+--   Linux x64   -> usqlbridge-linux-amd64.so
+--   Linux arm64 -> usqlbridge-linux-arm64.so
+--   macOS arm64 -> usqlbridge-darwin-arm64.dylib
+--   macOS x64   -> usqlbridge-darwin-amd64.dylib
+--   Windows x64 -> usqlbridge-windows-amd64.dll
+--
+-- 工件解析顺序（bootstrap）：
 --   1. spec 里的 lib 字段（完整路径，显式指定，最高优先）
 --   2. 环境变量 USQL_BRIDGE_LIB
---   3. ~/.duckdb/luajit-libs/usqlbridge-linux-amd64.so（缓存位置，与 install 的 Lua 缓存同目录）
---   4. curl 从 GitHub release 拉取到缓存位置（best-effort；部分网络到 GitHub release CDN 很慢/不通，失败走 ERR 行提示手动下载）
---   手动放置：gh release download v0.1.0 --repo alitrack/usql-bridge 后放到第 3 处。
+--   3. ~/.duckdb/luajit-libs/<平台工件名>（缓存位置，与 install 的 Lua 缓存同目录）
+--   4. curl 从 GitHub release 拉取到缓存位置（best-effort，仅 POSIX shell；部分网络到
+--      GitHub release CDN 很慢/不通，失败走 ERR 行提示手动下载）
+--   手动放置：gh release download v0.1.1 --repo alitrack/usql-bridge 后放到第 3 处。
 --
 -- 形态：表函数（luajit_table）。list 参数 = JSON 规格字符串（扁平对象，内联解析）：
 --   {"op":"connect","url":"moderncsqlite:////tmp/x.db"}   -- 连接，返回一行（id=N 或 ERR: ...）
@@ -39,8 +47,24 @@ ffi.cdef[[
   extern void free(void* ptr);
 ]]
 
-local ARTIFACT = 'usqlbridge-linux-amd64.so'
-local REL = 'https://github.com/alitrack/usql-bridge/releases/download/v0.1.0/' .. ARTIFACT
+local REL_TAG = 'v0.1.1'
+local IS_WIN = (jit and jit.os == 'Windows')
+
+-- 平台 -> 工件名。LuaJIT 的 jit.os: Linux / OSX / Windows；jit.arch: x64 / arm64。
+local function artifact_name()
+  local osname = (jit and jit.os) or 'Linux'
+  local arch = (jit and jit.arch) or 'x64'
+  local a = (arch == 'arm64') and 'arm64' or 'amd64'
+  if osname == 'Windows' then return 'usqlbridge-windows-' .. a .. '.dll' end
+  if osname == 'OSX' or osname == 'macOS' then return 'usqlbridge-darwin-' .. a .. '.dylib' end
+  return 'usqlbridge-linux-' .. a .. '.so'
+end
+
+local ARTIFACT = artifact_name()
+-- 下载基址可覆盖（镜像/自建源，也用于离线验证下载链路）：USQL_BRIDGE_BASE_URL 需带结尾 /
+local REL_BASE = os.getenv('USQL_BRIDGE_BASE_URL')
+  or ('https://github.com/alitrack/usql-bridge/releases/download/' .. REL_TAG .. '/')
+local REL = REL_BASE .. ARTIFACT
 
 -- 极简 JSON 解析：只认扁平对象 {"k":"str","n":123}（string 值 + 数字值），
 -- 够 usql 的 spec 用，避免引入 labs json 库依赖（保持单文件自包含）。
@@ -97,11 +121,34 @@ local function cache_path()
 end
 
 local function ensure_dir(p)
-  local r = io.popen('mkdir -p ' .. p, 'r')
+  local cmd = IS_WIN and ('if not exist "' .. p .. '" mkdir "' .. p .. '"') or ('mkdir -p ' .. p)
+  local r = io.popen(cmd, 'r')
   if r then r:read('a') r:close() end
 end
 
+-- 工件头魔数校验：CDN 会静默截断（实测 GitHub release CDN 慢时只落地一半，
+-- dlopen 半截文件直接失败）。按平台认前 4 字节，截断文件一律当没下成。
+local function magic_ok(path)
+  local f = io.open(path, 'rb')
+  if not f then return false end
+  local head = f:read(4)
+  f:close()
+  if not head or #head < 4 then return false end
+  local b1, b2, b3, b4 = head:byte(1, 4)
+  if IS_WIN then                                               -- PE: MZ
+    return b1 == 0x4D and b2 == 0x5A
+  end
+  if jit and jit.os == 'OSX' then                              -- Mach-O 64 LE / fat
+    return (b1 == 0xCF and b2 == 0xFA and b3 == 0xED and b4 == 0xFE)
+        or (b1 == 0xCA and b2 == 0xFE and b3 == 0xBA and b4 == 0xBE)
+  end
+  return b1 == 0x7F and b2 == 0x45 and b3 == 0x4C and b4 == 0x46 -- ELF
+end
+
+-- 自动下载只在 POSIX shell 下做（依赖 rm/curl）；Windows 上跳过，走手动放置，
+-- 失败时的 ERR 行会给出 gh 下载命令和目标目录。
 local function download(url, dest)
+  if IS_WIN then return false end
   io.popen('rm -f ' .. dest, 'w')
   local r = io.popen('curl -sL --max-time 600 -o ' .. dest .. ' ' .. url .. ' 2>/dev/null', 'r')
   if r then r:read('a') r:close() end
@@ -109,7 +156,7 @@ local function download(url, dest)
   if not f then return false end
   local n = #f:read('a')
   f:close()
-  if n < 1000000 then -- 工件 15MB 量级；小于 1MB = 没拉全（CDN 截断）
+  if n < 4000000 or not magic_ok(dest) then -- 真实工件 10MB 量级；小了或头不对 = 没拉全
     os.remove(dest)
     return false
   end
@@ -130,7 +177,17 @@ local function loadlib(spec_lib)
   local p
   for i = 1, #candidates do
     local f = io.open(candidates[i], 'rb')
-    if f then f:close() p = candidates[i] break end
+    if f then
+      f:close()
+      -- 显式指定的路径（spec.lib / 环境变量）信任调用方，交给 ffi.load 报错；
+      -- 缓存目录里的截断文件当不存在处理并清掉，让下面重新下载。
+      if candidates[i] == cache_path() and not magic_ok(candidates[i]) then
+        os.remove(candidates[i])
+      else
+        p = candidates[i]
+        break
+      end
+    end
   end
 
   if not p then
@@ -140,7 +197,7 @@ local function loadlib(spec_lib)
     else
       return nil, 'cannot load ' .. ARTIFACT .. ': not in ' .. table.concat(candidates, ', ')
         .. ' and auto-download failed (GitHub release CDN slow/unreachable?).'
-        .. ' Manual: gh release download v0.1.0 --repo alitrack/usql-bridge'
+        .. ' Manual: gh release download ' .. REL_TAG .. ' --repo alitrack/usql-bridge'
         .. ', place at ' .. cache_path()
     end
   end

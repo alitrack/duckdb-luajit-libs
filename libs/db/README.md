@@ -10,7 +10,7 @@
 - `test_dbcli.sql` — sqlite3 全链路测试（建库/插数/查询/聚合/错误可见化）。
 - `test_dbcli_install.sql` — 真实用户链路：`install` 远程拉取后查库。
 - `test_dbcli_usql.sql` — usql 集成：一个二进制查 40+ 种库的 DSN。
-- 三份 `PoC-dbcli-*-output.txt` 是上述测试的真实输出，作为可复现证据。
+- 仓库根目录三份 `PoC-dbcli-*-output.txt` 是上述测试的真实输出，作为可复现证据。
 
 ## 快速上手
 
@@ -55,6 +55,7 @@ SELECT val FROM luajit_table('dbcli', list := '{
 ```bash
 git clone --depth 1 https://github.com/xo/usql && cd usql
 CGO_ENABLED=1 go build -tags most -o /opt/bin/usql_most .
+# 全驱动产物约 292MB；默认构建只有 76MB，但只编进 7 种库
 ```
 
 > `usql/drivers/` 是 45 个驱动目录，`sqlite3`/`moderncsqlite`、`mysql`/`mymysql`、
@@ -75,6 +76,6 @@ CGO_ENABLED=1 go build -tags most -o /opt/bin/usql_most .
 
 ## 边界（它不解决什么）
 - **性能**：Lua 起子进程走 CLI 是"数据搬运"，不是原生驱动。高并发/大结果集/列式直读用原生扩展。这里服务**长尾、低 QPS、一次性**查询。
-- **二进制分发**：usql 76MB、需 CGO。纯 Lua 包要带它得把二进制作为资产一起发。
+- **二进制分发**：usql 全驱动版 292MB（默认构建 76MB，但只含 7 种库）、需 CGO。纯 Lua 包要带它得把二进制作为资产一起发。
 
 对外技术文章见 `docs/article-dbcli-usql.md`。

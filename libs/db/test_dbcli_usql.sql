@@ -1,4 +1,4 @@
--- dbcli + usql 集成测试：一个 client 覆盖 45 种数据库的 DSN 协议
+-- dbcli + usql 集成测试：一个 client 覆盖 45 个驱动目录 / 40+ 种数据库的 DSN 协议
 -- usql_most = -tags most 全驱动构建
 LOAD '/mnt/d/wsl2/luajit/build/release/luajit.duckdb_extension';
 SELECT * FROM luajit_module(mode := 'quick_compile', sql_name := 'dbcli',

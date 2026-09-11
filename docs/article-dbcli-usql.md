@@ -1,12 +1,12 @@
-# 让 DuckDB 用一条 SQL 查 40+ 种数据库：一个 Lua 文件 + 一个 76MB 的二进制
+# 让 DuckDB 用一条 SQL 查 40+ 种数据库：一个 Lua 文件 + 一个 292MB 的二进制
 
-> 本文所有数字都是真实跑出来的，不是演示。文末附可复现的测试脚本。
+> 文里的数字都是本机跑出来的，不是演示。复现命令、测试脚本和原始输出都在仓库里。
 
 ## 一个反直觉的事实
 
-DuckDB 是列式分析引擎，但它**天生只能查自己**。你想让它查一下你本地那个 MySQL、那个 Postgres、那个 ClickHouse？社区扩展里 `mysql`、`postgres`、`clickhouse` 各有专门包——可它们只覆盖最主流的几种。
+DuckDB 是列式分析引擎，但它**天生只能查自己**。想让它顺手查一下你本地那个 MySQL、那个 Postgres、那个 ClickHouse？社区扩展里 `mysql`、`postgres`、`clickhouse` 各有专门包——可它们也就覆盖最主流的这几种。
 
-更常见的数据库，DuckDB 根本没有现成扩展：
+再往下那一大堆数据库，DuckDB 根本没有现成扩展：
 
 - 你公司内网那个**私有协议的 OLAP**
 - 某个**国产数据库**（达梦、人大金仓、openGauss……）
@@ -36,9 +36,9 @@ SELECT row_idx, val FROM luajit_table('dbcli', list := '{
 返回的每一行，就是一个 JSON 对象：
 
 ```
-{"score":91.5,"id":1,"name":"alice"}
-{"score":84,"id":2,"name":"bob"}
-{"score":77.25,"id":3,"name":"charlie"}
+{"id":1,"name":"alice","score":91.5}
+{"id":2,"name":"bob","score":84}
+{"id":3,"name":"charlie","score":77.25}
 ```
 
 然后你就能继续用 DuckDB 的 SQL 对它做聚合、join、窗口——**Lua 负责"把数据搬进来"，DuckDB 负责"算"**。这就是我们说的"transport 层"：它不管你怎么查，只负责把外部数据库的行喂给 DuckDB。
@@ -47,7 +47,7 @@ SELECT row_idx, val FROM luajit_table('dbcli', list := '{
 
 如果只是"调本机 CLI"，那你有多少种库就得认识多少个客户端的名字。真正省事的是 **usql**——[github.com/xo/usql](https://github.com/xo/usql)，"通用 SQL 命令行"。
 
-它把 40+ 种数据库的 Go 驱动编译进**同一个二进制**。一个 `usql_most`（76MB），DSN 前缀一换，连的库就换：
+它把 40+ 种数据库的 Go 驱动编译进**同一个二进制**。一个 `usql_most`（全驱动构建，292MB），DSN 前缀一换，连的库就换：
 
 | DSN 前缀 | 数据库 |
 |---|---|
@@ -63,7 +63,7 @@ SELECT row_idx, val FROM luajit_table('dbcli', list := '{
 | `cosmos://` / `dynamodb://` / `ots://` | 文档/宽表 |
 | `oracle://` / `godror://` / `firebird://` / `h2://` / `ignite://` / `vertica://` / `voltdb://` / `ydb://` … | 其余 20+ 种 |
 
-> 准确数一下：`usql` 的 `drivers/` 下是 **45 个驱动目录**，但其中 `sqlite3`/`moderncsqlite`、`mysql`/`mymysql`、`postgres`/`pgx` 各是同一库的不同 Go 绑定，所以是 **40+ 种独立数据库**。另外 usql 定位是 **SQL 通用 CLI**——`redis`、`mongo`、`elasticsearch`、`influxdb` 这类非 SQL 库**不在内**。
+> 数字口径：`usql` 的 `drivers/` 下是 **45 个驱动目录**，其中 `sqlite3`/`moderncsqlite`、`mysql`/`mymysql`、`postgres`/`pgx` 各是同一个库的不同 Go 绑定，所以独立数据库算 **40+ 种**。另外 usql 的定位是 **SQL 通用 CLI**——`redis`、`mongo`、`elasticsearch`、`influxdb` 这类非 SQL 库**不在内**。体积上，全驱动版 292MB；默认构建只有 76MB，但里面只编进了 7 种库。
 
 所以 `dbcli.lua` 里，"支持 40+ 种数据库"不是 40 段代码，是**一条 client 名 + 换 DSN**：
 
@@ -89,12 +89,17 @@ U5  {"q":7}              ← 连 DuckDB 自己的文件库（most 里含 duckdb 
 
 ## 两个"先跑一遍才知道"的坑
 
-这篇文章的结论都是实测出来的。过程中踩到两个坑，光看文档不会告诉你：
+这部分结论全是实测出来的。踩到两个坑，光看文档看不出来。
 
-**坑 1：SQL 单引号 vs shell 单引号。** `dbcli` 用 `io.popen` 起子进程，走的是 `sh -c`。如果你把 SQL 当**命令行参数**传，会撞上两层转义——shell 的单引号规则和 SQL 字面量的单引号翻倍规则**不一样**。实测会拿到 sqlite3 的 `error here ---^`。
+**坑 1：SQL 单引号 vs shell 单引号。**
+
+`dbcli` 用 `io.popen` 起子进程，走的是 `sh -c`。如果你把 SQL 当**命令行参数**传，会撞上两层转义——shell 的单引号规则和 SQL 字面量的单引号翻倍规则**不一样**。实测拿到的是 sqlite3 的 `error here ---^`。
+
 **正解**：SQL 一律走 **stdin 临时文件**，字节完全不进命令行，引号 / 换行 / 中文 / 超长语句全免疫。
 
-**坑 2：usql 的 stdin 必须带尾分号。** usql 从 stdin 读 SQL 时，语句**不带 `;` 就静默返回空**（用 `-c` 形式则不用）。这个行为没有任何文档写。更坑的是，如果 `client` 传的是完整路径（`/opt/bin/usql_most`），你写 `client == "usql"` 判断补分号永远不成立——得按 **basename** 匹配。
+**坑 2：usql 的 stdin 必须带尾分号。**
+
+usql 从 stdin 读 SQL 时，语句**不带 `;` 就静默返回空**（用 `-c` 形式则不用）。这个行为没有任何文档写过。更坑的是，如果 `client` 传的是完整路径（`/opt/bin/usql_most`），你写 `client == "usql"` 判断补分号永远不成立——得按 **basename** 匹配。
 
 这两个坑，都是"跑一遍"才暴露的。这也是为什么我坚持：**宣称能力之前，先验执行层**。
 
@@ -103,9 +108,10 @@ U5  {"q":7}              ← 连 DuckDB 自己的文件库（most 里含 duckdb 
 **解决**：DuckDB 想查一个"没有现成扩展、但本机有 CLI"的数据库，**不用写 Rust、不用重编扩展**。加一种库 = 装好它的 CLI（或 usql）+ 一条 SQL。
 
 **不解决**：
+
 - **性能**：Lua 起子进程走 CLI，是"数据搬运"，不是"原生驱动"。高并发 / 大结果集 / 需要列式直读的场景，该用原生扩展就用原生。它服务的是**长尾、低 QPS、一次性**的查询。
-- **写保护**：`dbcli` 是把 SQL 原样交给外部 CLI 执行，DuckDB 侧的 read-only / production 写保护**管不到子进程里**。要写外部库，你自己负责权限。
-- **二进制分发**：usql 76MB、需要 `CGO` 构建。要把它塞进一个纯 Lua 的包，得把二进制作为资产一起发。
+- **写保护**：`dbcli` 把 SQL 原样交给外部 CLI 执行，DuckDB 侧的 read-only / production 写保护**管不到子进程里**。要写外部库，权限自己负责。
+- **二进制分发**：usql 全驱动版 292MB、需要 `CGO` 构建。要把它塞进一个纯 Lua 的包，得把二进制作为资产一起发。
 
 ## 一句话总结
 
@@ -119,7 +125,7 @@ DuckDB 的 `duckdb_universal` 已经有 15 个 Rust transport；`dbcli` 是它�
 ### 复现
 
 ```bash
-# 1. 构建 usql 全驱动版（45 库，CGO）
+# 1. 构建 usql 全驱动版（-tags most，45 个驱动目录，产物约 292MB，CGO）
 git clone --depth 1 https://github.com/xo/usql
 cd usql && CGO_ENABLED=1 go build -tags most -o /opt/bin/usql_most .
 
@@ -127,5 +133,6 @@ cd usql && CGO_ENABLED=1 go build -tags most -o /opt/bin/usql_most .
 duckdb -unsigned -f libs/db/test_dbcli_usql.sql
 ```
 
-代码：`duckdb-luajit-libs` 仓库 `libs/db/dbcli.lua`（MIT）。
-本文全部测试输出已作为 `PoC-dbcli-usql-output.txt` 提交进仓库。
+脚本里有两处本机绝对路径（`luajit` 扩展、`usql` 二进制），换成你自己的再跑。
+
+代码在 `duckdb-luajit-libs` 仓库（[github.com/alitrack/duckdb-luajit-libs](https://github.com/alitrack/duckdb-luajit-libs)）：`libs/db/dbcli.lua`（MIT）、测试脚本 `libs/db/test_dbcli*.sql`；本文用到的原始输出作为 `PoC-dbcli-*-output.txt` 提交在仓库根目录。

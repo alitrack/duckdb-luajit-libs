@@ -85,3 +85,15 @@ Lua 的闭包只能捕获**定义时**已经在作用域里的 local。`load_jso
 ---
 
 *代码：Go 桥在 `alitrack/usql-bridge`，Lua 库在 `alitrack/duckdb-luajit-libs` 的 `libs/db/usql.lua`。复现和实测输出都在仓库里。*
+
+---
+
+## 附：体积口径补注（2026-09-14 实测）
+
+正文里的「292MB 二进制」指**全驱动、未 strip** 的构建读数。三个口径分开看（Go 1.26.1 / `CGO_ENABLED=1`，官方发布配方复现差 0.11%）：
+
+- 官方 `usql` v0.21.4 linux-amd64 发布件（`most` + 7 个 sqlite tag + `-ldflags "-s -w"`）= **208,037,792 B（198 MiB）**
+- 同 tag 未 strip = 278.4 MB
+- 零驱动基线（`-tags no_base`）= **18.2 MiB**；单驱动边际 +2.4 MB（mysql）～**+67.8 MB**（duckdb）
+
+所以本篇 `.so` 的 **20.8 MB** 与「292MB」不是同一口径的两件东西：前者只编进一个驱动（`moderncsqlite`）+ Parquet 导出，后者是把 46 个驱动目录全编进一个可执行文件。全文归因（逐驱动边际表、dbx 侧对照）见 wiki `dbx-vs-usql-binary-size-20260914`。

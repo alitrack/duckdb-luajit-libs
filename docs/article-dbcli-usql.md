@@ -136,3 +136,21 @@ duckdb -unsigned -f libs/db/test_dbcli_usql.sql
 脚本里有两处本机绝对路径（`luajit` 扩展、`usql` 二进制），换成你自己的再跑。
 
 代码在 `duckdb-luajit-libs` 仓库（[github.com/alitrack/duckdb-luajit-libs](https://github.com/alitrack/duckdb-luajit-libs)）：`libs/db/dbcli.lua`（MIT）、测试脚本 `libs/db/test_dbcli*.sql`；本文用到的原始输出作为 `PoC-dbcli-*-output.txt` 提交在仓库根目录。
+
+---
+
+## 附：体积口径补注（2026-09-14 实测）
+
+正文里那句「全驱动版 292MB」是当时本机 `-tags most` **未 strip** 的构建读数。按官方发布配方重测后，把三个口径摆在一起（Go 1.26.1 / `CGO_ENABLED=1`）：
+
+| 口径 | 体积 |
+|---|---|
+| **官方 v0.21.4 linux-amd64 发布件**（`most` + 7 个 sqlite tag + `-ldflags "-s -w"`） | **208,037,792 B（198 MiB）** |
+| 本机按官方配方重建（同 tag + `-s -w`） | 208,263,296 B（与官方差 0.11%，配方复现通过） |
+| 同 tag 但**未 strip** | 278.4 MB（`-s -w` 省掉 70.3 MB） |
+| 零驱动基线（`-tags no_base`） | **18.2 MiB** |
+| 默认 base 构建（不写 tag） | 59.2 MiB |
+
+**逐驱动边际**（在 18.2 MB 基线上单独加一个驱动，实测）：`duckdb` **+67.8 MB**（整个 DuckDB 引擎被静态链入，duckdb-go-bindings 的 linux-amd64 静态库目录 129 MB）、`spanner` +40.3、`snowflake` +28.4、`bigquery` +23.7、`oracle` +18.2、`sqlserver` +8.9、`sqlite3` +3.5、`postgres` +3.1、`mysql` +2.4……45 组构建读数见 wiki `dbx-vs-usql-binary-size-20260914`。
+
+一句话：**体积来自驱动集合，不是 usql 本体**（什么都不连也有 18.2 MiB）。所以下篇的产品化路线选择「只把需要的驱动编进去」——那个 `.so` 只编进一个驱动，就是这条约束的直接结果。

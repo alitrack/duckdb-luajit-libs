@@ -9,8 +9,12 @@
 --        相反（固有符号自由度，UΣVT=A 重建不受影响）；cuSOLVER 必须用 64 位 Xgesvd
 --        （32 位 dgesvd 在 Ada N≥768 失败）。无 GPU 时静默走 CPU，行为不变。
 -- @source: original（duckdb-luajit 系列）
--- @requires: libopenblas.so（含 LAPACK；Debian/Ubuntu: libopenblas-dev，系统自带；macOS: brew install openblas）
---            GPU 模式额外需要 CUDA toolkit（libcublas.so.13/libcusolver.so.12/libcudart）
+-- @requires: 系统 OpenBLAS（含 LAPACK）：
+--            Debian/Ubuntu: libopenblas-dev（通常已装）; macOS: brew install openblas;
+--            Windows: 下载 OpenBLAS Windows 预编译包（InsightfulScience/openblas-bin
+--            或 xianyi/OpenBLAS 的 OpenBLAS-0.3.x-x64-64.zip）解压，openblas.dll
+--            所在目录加 PATH；任意平台找不到时设 LUALINALG_LIB=<完整路径>
+--            GPU 模式（可选）：CUDA toolkit + LUA_LINALG_GPU=1（自动探测 cuBLAS/cuSOLVER）
 --
 -- 用法：
 --   矩阵 = 扁平行主序 DOUBLE[] + m/n 维度（luajit_s 不支持嵌套 LIST）：
@@ -184,36 +188,65 @@ local CblasNoTrans = 111
 local CblasTrans = 112
 
 -- 加载链：LUALINALG_LIB 环境变量 → 系统搜索路径 → 常见用户路径
+-- 按 OS 分流：Windows 找 openblas.dll（Insight 包为 openblas.dll+kernel32），
+-- Linux 找 libopenblas.so(.0)，macOS 找 libopenblas.dylib。
+-- 找不到时错误提示给出该平台的安装命令 + LUALINALG_LIB 兜底。
+local ffi_os = ffi.os
+local function probe(names, paths)
+  for _, name in ipairs(names) do
+    local ok, l = pcall(ffi.load, name)
+    if ok and l.cblas_dgemm then return l end
+  end
+  if paths then
+    for _, p in ipairs(paths) do
+      local ok, l = pcall(ffi.load, p)
+      if ok and l.cblas_dgemm then return l end
+    end
+  end
+  return nil
+end
+
 local lib
-local cpu_backend_error = nil
+local cpu_backend_error
 local custom = os and os.getenv and os.getenv('LUALINALG_LIB')
 if custom then
   local ok, l = pcall(ffi.load, custom)
   if ok and l.cblas_dgemm then lib = l end
 end
 if not lib then
-  for _, name in ipairs({ 'openblas', 'libopenblas', 'blas', 'libblas' }) do
-    local ok, l = pcall(ffi.load, name)
-    if ok and l.cblas_dgemm then lib = l break end
+  if ffi_os == 'Windows' then
+    -- Windows：libopenblas.dll（xianyi/OpenBLAS 预编译包）或 openblas.dll（Insight 包）
+    -- ffi.load(name) 在 Windows 会自动补 lib 前缀 + .dll 后缀，故 'openblas'→libopenblas.dll
+    local win_paths = {
+      'libopenblas.dll',
+      (os.getenv('LOCALAPPDATA') or '') .. '\\openblas\\libopenblas.dll',
+      'C:\\openblas\\libopenblas.dll',
+      'D:\\openblas\\libopenblas.dll',
+    }
+    lib = probe({ 'openblas', 'libopenblas' }, win_paths)
+    if not lib then
+      cpu_backend_error = 'linalg: cannot load libopenblas.dll — CPU 算子不可用。'
+        .. ' 下载 OpenBLAS Windows 预编译包 https://github.com/xianyi/OpenBLAS/releases '
+        .. '（OpenBLAS-0.3.x-x64-64.zip，内含 bin/libopenblas.dll）解压后，'
+        .. ' 把 bin 目录加入 PATH（或设 LUALINALG_LIB=<libopenblas.dll 完整路径>）后重启。'
+        .. ' GPU 可用：CUDA + nvidia-smi 环境设 LUA_LINALG_GPU=1（此时 CPU 依赖可省略）'
+    end
+  else
+    local home = os and os.getenv and (os.getenv('HOME') or '')
+    local unix_paths = {
+      home .. '/.local/lib/libopenblas.so',
+      '/usr/lib/x86_64-linux-gnu/libopenblas.so.0',
+      '/usr/local/lib/libopenblas.so',
+      '/opt/homebrew/lib/libopenblas.dylib',
+      '/usr/local/opt/openblas/lib/libopenblas.dylib',
+    }
+    lib = probe({ 'openblas', 'libopenblas', 'blas', 'libblas' }, unix_paths)
+    if not lib then
+      cpu_backend_error = 'linalg: cannot load libopenblas — CPU 算子不可用 '
+        .. '(Debian/Ubuntu: sudo apt install libopenblas-dev; macOS: brew install openblas; '
+        .. 'or set LUALINALG_LIB to the full path of libopenblas.so; 或用 LUA_LINALG_GPU=1 走 GPU 后端)'
+    end
   end
-end
-if not lib and os and os.getenv then
-  local home = os.getenv('HOME') or ''
-  for _, p in ipairs({
-    home .. '/.local/lib/libopenblas.so',
-    '/usr/lib/x86_64-linux-gnu/libopenblas.so.0',
-    '/usr/local/lib/libopenblas.so',
-    '/opt/homebrew/lib/libopenblas.dylib',
-    '/usr/local/opt/openblas/lib/libopenblas.dylib',
-  }) do
-    local ok, l = pcall(ffi.load, p)
-    if ok and l.cblas_dgemm then lib = l break end
-  end
-end
-if not lib then
-  cpu_backend_error = 'linalg: cannot load libopenblas — CPU 算子不可用 '
-    .. '(Debian/Ubuntu: sudo apt install libopenblas-dev; macOS: brew install openblas; '
-    .. 'or set LUALINALG_LIB to the full path of libopenblas.so; 或用 LUA_LINALG_GPU=1 走 GPU 后端)'
 end
 
 -- ============ GPU 后端（可选：LUA_LINALG_GPU=1 且 cuBLAS/cuSOLVER 可加载） ============

@@ -9,11 +9,32 @@
 
 ## 依赖
 
-**libopenblas.so（含 LAPACK）**。Debian/Ubuntu：
+**系统 OpenBLAS（含 LAPACK）**：
 
-```bash
-sudo apt install libopenblas-dev   # 通常系统已装 libopenblas.so.0
-```
+- Debian/Ubuntu：`sudo apt install libopenblas-dev`（通常已装 `libopenblas.so.0`）
+- macOS：`brew install openblas`
+- 任意平台找不到库时设 `LUALINALG_LIB` 指向完整路径。
+
+### Windows
+
+> ⚠️ **能力边界（2026-09-14 实测）**：Windows 上 **`norm` 可用，复杂算子
+> （matmul/svd/eigh/inv/lu/chol/qr）不可用**——LuaJIT FFI 在 Windows x64 对
+> **超过 4 个参数**的调用（cblas_dgemm 14 参、dgesvd 12 参等）压栈错位，导致
+> 算空矩阵返回全 0、部分算子 segfault。4 参的 `cblas_dnrm2` 正常。
+> 根因在 LuaJIT FFI 的 Windows ABI，**不是 OpenBLAS**（同一 DLL 用 Python
+> ctypes 调 cblas_dgemm 结果正确）也**不是 linalg.lua 逻辑**（Linux 全过）。
+> 等源仓 FFI 调用改造成"单 struct 指针传参"规避压栈后，Windows 复杂算子才可用。
+
+若只需 `norm`（或想验证链路）：
+
+1. 下载 OpenBLAS Windows 预编译包 `OpenBLAS-0.3.x-x64-64.zip`
+   （https://github.com/xianyi/OpenBLAS/releases），解压后 `bin/libopenblas.dll`
+   所在目录加入 `PATH`（或设 `LUALINALG_LIB=<完整路径>`）。
+2. 加载 luajit 扩展。**社区暂无 Windows 包**（CI 排除了 windows_amd64），需从
+   源仓 release 手动下 `luajit-windows_amd64.duckdb_extension`，
+   **必须重命名为 `luajit.duckdb_extension`**（DuckDB 按"文件名+`_init_c_api`"
+   定位入口符号，带 `-windows_amd64` 后缀会加载失败）。
+3. 设 `LUALINALG_LIB` 指向 `libopenblas.dll` 后跑。
 
 macOS：`brew install openblas`。找不到库时设 `LUALINALG_LIB` 指向完整路径。
 

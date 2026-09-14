@@ -938,6 +938,25 @@ local gpu_ops = {
   matmul = gpu_matmul, svd = gpu_svd, eigh = gpu_eigh,
   lu = gpu_lu, inv = gpu_inv, chol = gpu_chol, qr = gpu_qr,
 }
+-- CPU 重算子自检（惰性：仅 Windows + 设 LUALINALG_WINDOWS_CPU=1 后首次重算子时触发一次）
+-- 用一次 2×2 dgemm 锚定验证 kernel 是否正确；结果缓存到 cpu_heavy_verified。
+-- 注意：若本 host 的 OpenBLAS kernel 损坏，自检调用本身可能 segfault（崩溃整个进程）——
+-- 因此默认路径（未设 env）根本不触发 dgemm，杜绝崩溃。
+local cpu_heavy_verified -- nil=未验证 / true=通过 / false=失败
+local function cpu_heavy_selfcheck()
+  if cpu_heavy_verified ~= nil then return cpu_heavy_verified end
+  local function attempt()
+    local A = ffi.new('double[4]', 1, 2, 3, 4)
+    local B = ffi.new('double[4]', 5, 6, 7, 8)
+    local C = ffi.new('double[4]', 0, 0, 0, 0)
+    lib.cblas_dgemm(CblasRowMajor, CblasNoTrans, CblasNoTrans, 2, 2, 2, 1.0, A, 2, B, 2, 0.0, C, 2)
+    return (C[0] == 19 and C[1] == 22 and C[2] == 43 and C[3] == 50)
+  end
+  local ok, r = pcall(attempt)
+  cpu_heavy_verified = (ok and r == true)
+  return cpu_heavy_verified
+end
+
 local function solve(p)
   local op = p.op
   local backend = p.backend or 'auto'
@@ -957,6 +976,28 @@ local function solve(p)
   end
   if not lib then
     return { status = 'Error', message = cpu_backend_error or 'no CPU backend available' }
+  end
+  -- CPU 重算子闸门（Windows 默认禁止）。2026-09-14 实测：MSVC 静态 CRT host（duckdb.exe /
+  -- mingw exe）下 xianyi 与 OpenMathLib 预编译 OpenBLAS 的 GEMM kernel 不工作 ——
+  -- cblas_dgemm 连续调用算出全 0 且会 segfault（崩溃整个进程，pcall 无法捕获）。
+  -- 4 参 cblas_dnrm2 正常（norm 可用），14 参 GEMM/LAPACK kernel 路径不可靠。
+  -- 动态 CRT host（Python ctypes）下同一 DLL 全对，故这是 host CRT 链接方式问题，
+  -- 非 FFI 传参（gmecho 纯回声探针已证 14 参全对）。
+  -- 默认在 Windows 上禁止调用重算子（杜绝静默给错 + 崩溃）；设 LUALINALG_WINDOWS_CPU=1
+  -- 可放行（模块加载时用一次 dgemm 自检，通过才真正允许）。
+  local heavy_cpu_ops = { matmul = 1, svd = 1, eigh = 1, inv = 1, lu = 1, chol = 1, qr = 1 }
+  if heavy_cpu_ops[op] and ffi_os == 'Windows' then
+    if (os and os.getenv and os.getenv('LUALINALG_WINDOWS_CPU') or '') ~= '1' then
+      return { status = 'Error', message = 'linalg ' .. op .. ' 在 Windows 上不可用：'
+        .. 'MSVC 静态 CRT host 下预编译 OpenBLAS 的 GEMM kernel 会算错甚至崩溃（2026-09-14 实测，'
+        .. '非 FFI 传参问题）。请改用：(1) GPU 后端 —— 设 LUA_LINALG_GPU=1 且 cuBLAS/cuSOLVER 可加载；'
+        .. '(2) Linux/macOS 宿主（同一 linalg 库直接可用）；'
+        .. '(3) 若你已换到与本进程 CRT 匹配的 OpenBLAS 构建，设 LUALINALG_WINDOWS_CPU=1 放行（首次重算子时 dgemm 自检，失败仍会拦截）' }
+    end
+    if not cpu_heavy_selfcheck() then
+      return { status = 'Error', message = 'linalg ' .. op .. '：OpenBLAS CPU 自检未通过（Windows 下 dgemm 未返回正确值），'
+        .. '本 host 的 OpenBLAS 重算子不可用。请换匹配的 OpenBLAS 构建，或改用 GPU 后端（LUA_LINALG_GPU=1）/ Linux/macOS 宿主' }
+    end
   end
   if op == 'matmul' then return op_matmul(p)
   elseif op == 'svd' then return op_svd(p)

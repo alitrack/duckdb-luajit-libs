@@ -414,6 +414,32 @@ local function op_matmul(p)
   return { c = to_flat(C, m * n) }
 end
 
+-- 纯 Lua matmul（零 OpenBLAS 依赖）。行主序 A(m×k) × B(k×n) → C(m×n)。
+-- Windows 专用兜底：静态 CRT host（duckdb.exe）下任何预编译 OpenBLAS 的 GEMM
+-- 都算错/segfault（2026-09-14 ctest5/ctest4 A/B 实测证死，根因=host CRT，非 OpenBLAS 构建）。
+-- matmul 是 O(mnk) 三重循环，纯 Lua 实现必对、不崩、无依赖 —— Windows 默认走这条。
+local function op_matmul_lua(p)
+  local A, m, k, err = flat_row(p, 'a')
+  if err then return { status = 'Error', message = 'matmul a: ' .. err } end
+  local B, k2, n, err2 = flat_row(p, 'b', p.mb, p.nb)
+  if err2 then return { status = 'Error', message = 'matmul b: ' .. err2 } end
+  if k ~= k2 then
+    return { status = 'Error', message = 'matmul: inner dims mismatch ' .. k .. ' vs ' .. k2 }
+  end
+  -- A 行主序 0-based: A(i,t)=A[i*k+t]；B: B(t,j)=B[t*n+j]
+  local C = {}
+  for i = 0, m - 1 do
+    for j = 0, n - 1 do
+      local s = 0
+      for t = 0, k - 1 do
+        s = s + A[i * k + t] * B[t * n + j]
+      end
+      C[#C + 1] = s
+    end
+  end
+  return { c = C, backend = 'lua' }
+end
+
 local function op_svd(p)
   local _, m, n, err = flat_row(p, 'a')
   if err then return { status = 'Error', message = 'svd: ' .. err } end
@@ -974,25 +1000,29 @@ local function solve(p)
         .. ' (set LUA_LINALG_GPU=1 and ensure cuBLAS/cuSOLVER/cudart loadable)' }
     end
   end
+  -- Windows matmul：纯 Lua 兜底（零 OpenBLAS 依赖，必对不崩）。2026-09-14 ctest5/ctest4 A/B
+  -- 实测证死：静态 CRT host（duckdb.exe）下任何预编译 OpenBLAS 的 GEMM 都算错/segfault，
+  -- 根因=host CRT 链接方式（动态 CRT 全对、静态 CRT 全错，含单线程），与 OpenBLAS 怎么编无关
+  -- → 重编 OpenBLAS 救不了静态 CRT 宿主。matmul 三重循环纯 Lua 即可；本分支在 `if not lib`
+  -- 之前，故不装 OpenBLAS 也能跑。设 LUALINALG_WINDOWS_CPU=1 且 lib 可用且自检通过 → OpenBLAS 快路径。
+  if op == 'matmul' and ffi_os == 'Windows' then
+    local want_fast = lib and cpu_heavy_selfcheck()
+      and (os and os.getenv and os.getenv('LUALINALG_WINDOWS_CPU') or '') == '1'
+    if want_fast then return op_matmul(p) end
+    return op_matmul_lua(p)
+  end
   if not lib then
     return { status = 'Error', message = cpu_backend_error or 'no CPU backend available' }
   end
-  -- CPU 重算子闸门（Windows 默认禁止）。2026-09-14 实测：MSVC 静态 CRT host（duckdb.exe /
-  -- mingw exe）下 xianyi 与 OpenMathLib 预编译 OpenBLAS 的 GEMM kernel 不工作 ——
-  -- cblas_dgemm 连续调用算出全 0 且会 segfault（崩溃整个进程，pcall 无法捕获）。
-  -- 4 参 cblas_dnrm2 正常（norm 可用），14 参 GEMM/LAPACK kernel 路径不可靠。
-  -- 动态 CRT host（Python ctypes）下同一 DLL 全对，故这是 host CRT 链接方式问题，
-  -- 非 FFI 传参（gmecho 纯回声探针已证 14 参全对）。
-  -- 默认在 Windows 上禁止调用重算子（杜绝静默给错 + 崩溃）；设 LUALINALG_WINDOWS_CPU=1
-  -- 可放行（模块加载时用一次 dgemm 自检，通过才真正允许）。
-  local heavy_cpu_ops = { matmul = 1, svd = 1, eigh = 1, inv = 1, lu = 1, chol = 1, qr = 1 }
+  -- CPU 重算子闸门（Windows 默认禁止 matmul 之外的重算子）。
+  local heavy_cpu_ops = { svd = 1, eigh = 1, inv = 1, lu = 1, chol = 1, qr = 1 }
   if heavy_cpu_ops[op] and ffi_os == 'Windows' then
     if (os and os.getenv and os.getenv('LUALINALG_WINDOWS_CPU') or '') ~= '1' then
       return { status = 'Error', message = 'linalg ' .. op .. ' 在 Windows 上不可用：'
-        .. 'MSVC 静态 CRT host 下预编译 OpenBLAS 的 GEMM kernel 会算错甚至崩溃（2026-09-14 实测，'
-        .. '非 FFI 传参问题）。请改用：(1) GPU 后端 —— 设 LUA_LINALG_GPU=1 且 cuBLAS/cuSOLVER 可加载；'
-        .. '(2) Linux/macOS 宿主（同一 linalg 库直接可用）；'
-        .. '(3) 若你已换到与本进程 CRT 匹配的 OpenBLAS 构建，设 LUALINALG_WINDOWS_CPU=1 放行（首次重算子时 dgemm 自检，失败仍会拦截）' }
+        .. 'MSVC 静态 CRT host（duckdb.exe）下任何预编译 OpenBLAS 的 LAPACK kernel 都算错甚至崩溃'
+        .. '（2026-09-14 ctest5/ctest4 A/B 实测证死，根因=host CRT 链接方式，非 FFI、非 OpenBLAS 版本；'
+        .. 'matmul 已改纯 Lua 实现可直接用）。请改用：(1) GPU 后端 —— 设 LUA_LINALG_GPU=1；'
+        .. '(2) Linux/macOS 宿主（同一 linalg 库直接可用）' }
     end
     if not cpu_heavy_selfcheck() then
       return { status = 'Error', message = 'linalg ' .. op .. '：OpenBLAS CPU 自检未通过（Windows 下 dgemm 未返回正确值），'

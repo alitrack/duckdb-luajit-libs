@@ -17,28 +17,35 @@
 
 ### Windows
 
-> ⚠️ **能力边界（2026-09-14 实测）**：Windows 上 **`norm` 可用，复杂算子
-> （matmul/svd/eigh/inv/lu/chol/qr）默认被 linalg 闸门拦截并清晰报错**
-> （不再静默返回全 0、不再崩溃整个进程）。
+> ⚠️ **能力边界（2026-09-14 实测）**：Windows 上 **`matmul` + `norm` 可用**
+> （matmul 走纯 Lua 三重循环，**零 OpenBLAS 依赖、不装库也能跑**；norm 走
+> `cblas_dnrm2`）。**svd/eigh/inv/lu/chol/qr 仍被 linalg 闸门拦截并清晰报错**
+> （不再静默返回全 0、不再崩溃整个进程；纯 Lua 实现待做）。
 >
 > **根因（已定位，非 FFI 传参）**：MSVC **静态 CRT** host（官方 duckdb.exe、
 > mingw 编译的 exe）加载预编译 OpenBLAS（xianyi 0.3.26 与 OpenMathLib 0.3.34
 > 行为一致）时，GEMM/LAPACK kernel 路径算错甚至 segfault；而动态 CRT host
-> （Python ctypes）调同一 DLL 结果正确。`gmecho` 纯回声探针已证 LuaJIT FFI
-> 传 14 参（寄存器+栈+浮点+指针）全对，独立 C 程序（不走 FFI）也复现 →
-> **排除 FFI 传参，也非 OpenBLAS 版本**，是 host CRT 链接方式与 OpenBLAS
-> 线程运行时的交互问题。
+> （Python ctypes、MSVC `/MD` 编译的 exe）调同一 DLL 结果正确。`ctest5`/`ctest4`
+> A/B 实测钉死：**动态 CRT host 全对（含单线程），静态 CRT host 全错（含单线程
+> 2×2）** → 排除 FFI 传参（`gmecho` 14 参回声全对）、排除 OpenBLAS 版本、
+> **排除线程数**，根因就是 host CRT 链接方式（动态=共享单实例 `msvcrt.dll`
+> 正常；静态=每二进制自带一份，host+DLL 两份 CRT 并存 → OpenBLAS 跨 CRT
+> 线程/kernel 协调被破坏）。
 >
-> 因此 **不要**改 FFI/luajit 的调用约定（"单 struct 指针"方案已证伪）。
-> `norm`（`cblas_dnrm2`，4 参）不受影响，始终可用。
+> **重要推论**：决定成败的是 **host 的 CRT**，不是 DLL 怎么编。duckdb.exe 是
+> 官方静态 CRT 构建、改不了 → **重编 OpenBLAS（无论 `/MD` 还是 `/MT`）都救不了
+> 静态 CRT 宿主**（照样两份 CRT 并存）。所以"换/重编 OpenBLAS"这条路在 duckdb.exe
+> 上原理性走不通。
 >
-> 想用 Windows 复杂算子，三选一：
-> 1. **GPU 后端**：设 `LUA_LINALG_GPU=1` 且 cuBLAS/cuSOLVER/cudart 可加载；
-> 2. **Linux/macOS 宿主**：同一 linalg 库直接可用（已验证全过）；
-> 3. **换到与本进程 CRT 匹配的 OpenBLAS 构建**（如 MSVC 动态 CRT 重打包）后
->    设 `LUALINALG_WINDOWS_CPU=1` 放行——linalg 首次重算子时做一次 dgemm
->    自检，通过才放行，未通过仍拦截（⚠️ 若该 OpenBLAS 在本 host 上 kernel
->    损坏，自检调用本身可能 segfault，属 opt-in 风险）。
+> 因此 **不要**改 FFI/luajit 的调用约定（"单 struct 指针"方案已证伪），也
+> **不要**指望重编 OpenBLAS 修 Windows。
+>
+> Windows 上用复杂算子的路径：
+> 1. **matmul**：已可用（纯 Lua，零依赖）；
+> 2. **其余（svd/eigh/inv/lu/chol/qr）**：(a) GPU 后端 —— 设 `LUA_LINALG_GPU=1`
+>    且 cuBLAS/cuSOLVER/cudart 可加载；(b) Linux/macOS 宿主（同一 linalg 库直接
+>    可用，已验证全过）；(c) 若你能拿到**动态 CRT 宿主**（如自己 `/MD` 链接的
+>    程序），设 `LUALINALG_WINDOWS_CPU=1` 放行（首次重算子 dgemm 自检，通过才放行）。
 
 若只需 `norm`（或想验证链路）：
 

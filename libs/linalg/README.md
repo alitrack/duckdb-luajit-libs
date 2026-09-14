@@ -31,9 +31,11 @@
    （https://github.com/xianyi/OpenBLAS/releases），解压后 `bin/libopenblas.dll`
    所在目录加入 `PATH`（或设 `LUALINALG_LIB=<完整路径>`）。
 2. 加载 luajit 扩展。**社区暂无 Windows 包**（CI 排除了 windows_amd64），需从
-   源仓 release 手动下 `luajit-windows_amd64.duckdb_extension`，
-   **必须重命名为 `luajit.duckdb_extension`**（DuckDB 按"文件名+`_init_c_api`"
-   定位入口符号，带 `-windows_amd64` 后缀会加载失败）。
+   源仓 release 手动下载。**v0.32.4 起** asset 为 `luajit.windows_amd64.duckdb_extension`
+   （点号分隔），**可直接 LOAD**（v0.32.3 及更早的连字符命名
+   `luajit-windows_amd64...` 会报 `did not contain function`——DuckDB 按"文件名
+   第一个点前 + `_init_c_api`"定位入口符号，需重命名为 `luajit.duckdb_extension`
+   才能加载）。
 3. 设 `LUALINALG_LIB` 指向 `libopenblas.dll` 后跑。
 
 macOS：`brew install openblas`。找不到库时设 `LUALINALG_LIB` 指向完整路径。

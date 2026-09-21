@@ -45,3 +45,4 @@ privacy|libs/privacy/privacy.lua
 dbcli|libs/db/dbcli.lua
 usql|libs/db/usql.lua
 audit_chain|libs/security/audit_chain.lua
+jev_ask|libs/udf/jev_ask.lua

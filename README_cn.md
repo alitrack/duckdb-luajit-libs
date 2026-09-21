@@ -19,7 +19,7 @@ English README: [README.md](README.md)
 | `libs/export/` | **导出**——存储过程式 COPY 导出（query/表 → parquet/csv/json） | export（Lua 里一条 COPY TO） |
 | `libs/etl/` | **ETL 流程层**——审计日志、幂等加载校验、错误自愈、SQL 组件化、增量加载、缓慢变化维度 | etl（audit/validate/safe/q）、incremental、scd2 |
 | `libs/parser/` | **解析器**——数据结构/文本解析（JSON/JSONPath/YAML/XML/TOML/INI/Markdown/RSS/CSV/HTML/EPUB/日志…） | json（vendored rxi/json.lua）、yaml、xml、tomlini、markdown、jsonpatch、jsonpath、rss、csvdialect、htmlx、epub、zip_list（zip 清单）、unzip（deflate 解压）、id3 |
-| `libs/udf/` | **标量函数**——算法/编码/数学/字符串/网络/LLM UDF | base64、crc32、uuid、html_escape、iconv（编码检测/转码/语言检测）、cncheck（身份证/统一社会信用代码/银行卡/手机校验位 + 15→18 位转换）、fuzzy（相似度/距离）、tail_file（增量 tail）、qr（二维码生成）、cidr（网络 CIDR/IPv4/6）、pinyin（中文→拼音，pypinyin 词典 vendored）、llm_extract（LLM 结构化提取） |
+| `libs/udf/` | **标量函数**——算法/编码/数学/字符串/网络/LLM UDF | base64、crc32、uuid、html_escape、iconv（编码检测/转码/语言检测）、cncheck（身份证/统一社会信用代码/银行卡/手机校验位 + 15→18 位转换）、fuzzy（相似度/距离）、tail_file（增量 tail）、qr（二维码生成）、cidr（网络 CIDR/IPv4/6）、pinyin（中文→拼音，pypinyin 词典 vendored）、llm_extract（LLM 结构化提取）、jev_ask（类型化决策读数：带概率的语义判定） |
 | `libs/tooling/` | **工具**——仓库自维护/批量操作 | init（从 INDEX 批量 dofile+注册全部/指定库，离线可用） |
 | `libs/network/` | **网络/API**——HTTP/签名/私域 API 数据源 | （规划：signed-api、http 抓取） |
 | `libs/ffi/` | **FFI 绑定**——系统 C 库（dcmtk/open62541…）/编译型求解器；**资源生命周期规范**（[README_cn.md](libs/ffi/README_cn.md) 三条铁律 + 已实测坑清单 + [TEMPLATE.lua](libs/ffi/TEMPLATE.lua) 可复制骨架：ffi.gc 创建即绑定/释放顺序/JSON 返回约定；[README.md](libs/ffi/README.md) 英文精简版） | sudoku（C/Rust 版，比 Lua 参考版快 ~7×，[libs/ffi/sudoku](libs/ffi/sudoku/README_cn.md)） |
@@ -65,6 +65,7 @@ English README: [README.md](README.md)
 | `libs/udf/tail_file.lua` | udf | 增量日志/文件 tail（纯 Lua，无状态偏移状态机）：`tail` 从上次字节偏移续读新增行 → `{offset,count,lines}`（未完结行暂吐、下次补全；文件截断/重建自动重置 offset；`max` 限制条数）。DuckDB 无内建增量读，配合应用存回的 offset 做轮询消费 | 无（读文件需普通模式） |
 | `libs/udf/qr.lua` | udf | QR 码生成（纯 Lua，自包含，无 FFI）：`matrix`（模块二维数组 1=黑）、`svg`（可扫 SVG）、`ascii`（终端预览）、`info`（version/size/ec/mask）、`codewords`（数据+Reed-Solomon 码字 hex）。Byte 模式（任意 UTF-8）、EC 级别 L/M/Q/H、自动选 mask（penalty 最小）。**正确性经 python-qrcode 独立实现交叉校验：codewords 逐字节 IDENTICAL**（见 qr_verify.py） | 无 |
 | `libs/udf/cidr.lua` | udf | 网络 CIDR / IP 工具（纯 Lua，自包含）：`version`/`ip2int`/`int2ip`/`in_cidr`（成员判定）/`cidr_info`（network/broadcast/prefix/size/mask）/`classify`（public/private/loopback/link-local/multicast…）/`net`/`broadcast`。IPv4(32 位)+IPv6(128 位按 8×16 位 hextet)。DuckDB 无内建 CIDR/IPv4/IPv6 函数。**正确性经 Python ipaddress 独立交叉校验 140/141**（唯一差异=Python 对 1:2:3:4:5:6:7:8 的 is_reserved 误判） | 无 |
+| `libs/udf/jev_ask.lua` | udf | **类型化决策读出头接成 SQL 函数**——`state` + 查询时定义的问题（`choice`/`score`/`noul`）→ 返回**声明选项集上的概率分布**（读答案位之后那一个 token 的 top-k logprobs）。一次前向、零 token 生成、答案结构上不可能落在声明选项集之外。展开交给 DuckDB 原生 `json_extract`（配套宏见 `libs/udf/jev_ask_macros.sql`）：阈值门控 / `GROUP BY` 分档 / 当特征 / 决策台账。与 `llm_extract` 的分工：那个是**生成式**（要 parse、不确定靠猜），这个是**读数式**（一个能 `WHERE` 的列）。失败返回 `error: <msg>` 字符串而非静默 NULL（扩展会把 Lua `error()` 吞成 NULL），管道里用 `jev_ok(raw)` 断言 | curl CLI + 一个跑着的 jev 型决策服务 |
 | `libs/mcp/` (mcp-server.sql + sudoku.lua) | mcp | DuckDB 作为 MCP server 暴露 Lua UDF 给 AI（duckdb_mcp + luajit 合体） | duckdb_mcp 扩展 |
 | `libs/mcp/sudoku.lua` | mcp | 数独求解器（81 位题面 → 解，锚点验证）——模块表库：install 后 compile 包装成 UDF | 无 |
 | `libs/ffi/sudoku/` (sudoku_solve.c/.rs + README) | ffi | 同求解器的 C/Rust 版，LuaJIT FFI（`ffi.load`）调用，比 Lua 参考版快 ~7×——源码非 INDEX 可装库；编译 .so 后按路径加载 | gcc/rustc（构建时） |

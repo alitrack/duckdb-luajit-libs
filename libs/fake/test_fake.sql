@@ -169,3 +169,27 @@ SELECT
 FROM luajit_table('fake',
   list := '{"cols":{"name":"person.full","email":"","age":"person.age","dob":"person.dob"},"rows":1,"seed":11,"format":"json"}');
 -- 三列全 true（实体关联自洽）
+
+-- 19. 中文姓名：ctx 内同一行 name_cn 列与显式 person.first_cn 列一致（同一"人"），
+--     且长度 2~3 字
+SELECT json_extract_string(val,'$.name_cn') = json_extract_string(val,'$.name2') AS cn_same_in_row,
+       length(json_extract_string(val,'$.name_cn')) BETWEEN 2 AND 3 AS cn_len_ok
+FROM luajit_table('fake',
+  list := '{"cols":{"name_cn":"","name2":"person.first_cn"},"rows":1,"seed":5,"format":"json"}');
+-- true | true
+-- 19b. 两字/三字占比：10000 个名字，两字 30~60%、三字 30~60%（旧版两字 91%）
+WITH dist AS (
+  SELECT length(unnest(i::varchar[])) AS b
+  FROM (SELECT luajit_s('fake', {op:'rows', spec:{cols:{n:'person.first_cn'}, rows:10000, seed:1}})) t(i)
+)
+SELECT count(*) FILTER (WHERE b=2) BETWEEN 3000 AND 6000 AS two_char_ok,
+       count(*) FILTER (WHERE b=3) BETWEEN 3000 AND 6000 AS three_char_ok
+FROM dist;
+-- true | true
+
+-- 20. date 系 kind 在行/表规格里不再 0 行（旧 bug：ctx table 落进 lo_s 槽 → table:match
+--     抛错被表函数 pcall 吞成静默 0 行）。created_at/updated_at 自动推断 → date.datetime。
+SELECT count(*) = 3 AS date_rows_ok
+FROM luajit_table('fake',
+  list := '{"cols":{"name":"","created_at":"","updated_at":""},"rows":3,"seed":7,"format":"json"}');
+-- true

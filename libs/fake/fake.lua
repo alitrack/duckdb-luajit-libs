@@ -380,6 +380,7 @@ local function new_person_ctx(rng)
   function ctx.first() if not ctx._f then ctx._f = pick(rng, FIRST_EN) end return ctx._f end
   function ctx.last() if not ctx._l then ctx._l = pick(rng, LAST_EN) end return ctx._l end
   function ctx.full() return ctx.first() .. ' ' .. ctx.last() end
+  function ctx.first_cn() if not ctx._fc then ctx._fc = pick(rng, LAST_CN) .. cn_given(rng) end return ctx._fc end
   function ctx.gender() if not ctx._g then ctx._g = rng() < 0.5 and 'male' or 'female' end return ctx._g end
   local EMAIL_DOMAINS = {'example.com','example.org','example.net','test.com','mail.example.com'}
   function ctx.email()
@@ -420,7 +421,7 @@ end
 reg('person.first', function(rng, ctx) if ctx then return ctx.first() end return pick(rng, FIRST_EN) end)
 reg('person.last', function(rng, ctx) if ctx then return ctx.last() end return pick(rng, LAST_EN) end)
 reg('person.full', function(rng, ctx) if ctx then return ctx.full() end return pick(rng, FIRST_EN) .. ' ' .. pick(rng, LAST_EN) end)
-reg('person.first_cn', function(rng) return pick(rng, LAST_CN) .. cn_given(rng) end)
+reg('person.first_cn', function(rng, ctx) if ctx then return ctx.first_cn() end return pick(rng, LAST_CN) .. cn_given(rng) end)
 reg('person.gender', function(rng, ctx) if ctx then return ctx.gender() end return rng() < 0.5 and 'male' or 'female' end)
 reg('contact.email', function(rng, ctx)
   if ctx then return ctx.email() end

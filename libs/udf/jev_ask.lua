@@ -36,6 +36,17 @@
 --            jev_conf(raw,'team') AS conf
 --     FROM decisions WHERE jev_ok(raw) AND jev_conf(raw,'team') >= 0.8;
 --
+-- ── 批量管道（2026-09-22 实测，AG News N=1000，见 D:\wsl2\ag_news_data\AG_NEWS_BENCH.md）──
+--   单条 SQL 大查询 + per-row 门面宏（jev_ask_macros.sql 尾部 jev_questions/jev）:
+--     SET threads = 1;   -- ⚠️ 必须：per-row FFI UDF 在并行扫描里跨线程竞争，实测 threads=4
+--                        --    比串行慢 16%（8.19 vs 10.02 rows/s），0 失败但纯损耗
+--     SET VARIABLE q = (SELECT questions FROM jev_questions(<instructions>, <choice list>));
+--     SELECT id, jev_choice(r,'q') AS topic, jev_conf(r,'q') AS conf
+--     FROM (SELECT id, jev(body, getvariable('q')) AS r FROM t);
+--   实测：threads=1 门面 10.02 rows/s > Python loop（每行 fetchone）9.37 rows/s（快 ~7%，
+--        省 Python↔DuckDB 往返），0 失败、预测逐行一致。⇒ **批量走纯 SQL 门面，勿用
+--        Python loop、勿开并行**；吞吐上限是推理后端，不是传输层。
+--
 -- ── 设计纪律（四条，都是踩过的坑） ──────────────────────────────────────
 --   1. **本 lib 只做传输。** 题面渲染、字母槽位分配、槽位校验、概率归一化、confidence 公式
 --      全部留在服务端（jev 型服务）。在 SQL 层重写任何一条都是静默陷阱——实测代价：一句

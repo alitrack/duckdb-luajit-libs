@@ -34,6 +34,10 @@
 --      ABI 显式、无 varargs 类型猜测。
 --   4. 无连接池：curl_easy 每次 init/cleanup。Jev 场景（70-500ms 单次决策）下 fork 开销才是瓶颈，
 --      连接复用收益有限；真需要时再升级为 curl_multi 长连接（届时本文件接口不变）。
+--   5. **⚠️ 串行 per-row 专用（非并发安全）**：write 回调是模块级单函数 + 模块级状态（_collected 等），
+--      同一时刻只能有一个 in-flight 请求。批量跑务必走 **Python loop 逐行参数查询**（skill 实测比
+--      SQL table-scan 快 ~190x，且 per-row FFI 本就该串行）。若在 DuckDB 并行扫描（多线程）里调本
+--      lib 会竞态 → 回调状态互相踩。curl_ffi 本身**没有**线程锁，别在多线程 UDF 里裸调。
 
 local ffi = require('ffi')  -- 扩展的 Lua state 无全局 ffi（iconv.lua 同款写法，实测）
 
@@ -129,6 +133,40 @@ local function build_headers(t)
   return h
 end
 
+-- ── 写回调：模块级单函数 + 预 cast 成 C 指针（关键，2026-09-22 实测根因）──────────────
+-- 两个坑叠加，缺一不可：
+-- (a) 每次调用 `local function on_write` 新建闭包 → 每个不同闭包作为 C 回调都生成新 trampoline；
+-- (b) 即便同一模块级函数，**直接传 Lua 函数**给 setopt_cb 仍按调用生成 trampoline（LuaJIT 池有上限）
+--     → 批量几百次后 "too many callbacks"（N≤200 不报、N=1000 报 104 次，随调用数增长）。
+-- 解法：回调是模块级单函数（读模块级状态），且 **cast 成 C 指针一次**、之后每次传 cdata →
+-- 零 trampoline 增长（纯 Lua 1500 次循环实测全过）。状态非并发安全 → 串行 per-row（Python loop）。
+local _collected = {}
+local _n_bytes = 0
+local _oob = false
+local _max_size = 16 * 1024 * 1024
+
+local function on_write(ptr, size, nmemb, _ud)
+  local total = tonumber(size) * tonumber(nmemb)
+  if _oob or _n_bytes + total > _max_size then
+    _oob = true
+    return 0 -- 触发 CURL_WRITE_ERROR(23)，绝不静默截断
+  end
+  _collected[#_collected + 1] = ffi.string(ptr, total)
+  _n_bytes = _n_bytes + total
+  return total
+end
+
+-- 关键（2026-09-22 实测）：把回调 **cast 成 C 指针一次**，之后每次 setopt_cb 都传这个 cdata。
+-- 直接传 Lua 函数 on_write 会每次生成一个新 trampoline（LuaJIT trampoline 池有上限）→
+-- 批量几百次后 "too many callbacks"（N≤200 不报、N=1000 报 104 次）。cast 成 cdata 后
+-- 复用同一个 C 入口 = 零 trampoline 增长（纯 Lua 1500 次循环实测全过）。
+-- 必须懒计算：cast 依赖 cdef 已声明 curl_write_callback 类型（ensure() 里），不能在模块加载期算。
+local on_write_c
+local function get_on_write_c()
+  if not on_write_c then on_write_c = ffi.cast('curl_write_callback', on_write) end
+  return on_write_c
+end
+
 local function http_post(spec)
   if not ensure() then
     return nil, 'libcurl not found (need libcurl.so.4 / libcurl.4.dylib / libcurl-x64.dll in loader path)'
@@ -138,32 +176,21 @@ local function http_post(spec)
 
   local body = spec.body or ''
   local timeout = spec.timeout or 120
-  local max_size = spec.max_size or 16 * 1024 * 1024
+  _max_size = spec.max_size or 16 * 1024 * 1024
+
+  -- 复位模块级回调状态（串行前提下安全）
+  _collected = {}
+  _n_bytes = 0
+  _oob = false
 
   local handle = curl.curl_easy_init()
   if handle == nil then return nil, 'curl_easy_init failed' end
-
-  local collected = {}
-  local n_bytes = 0
-  local oob = false
-
-  -- write 回调：闭包捕获状态（LuaJIT 自动把 Lua 函数转 C 回调）
-  local function on_write(ptr, size, nmemb, _ud)
-    local total = tonumber(size) * tonumber(nmemb)
-    if oob or n_bytes + total > max_size then
-      oob = true
-      return 0 -- 触发 CURL_WRITE_ERROR(23)，绝不静默截断
-    end
-    collected[#collected + 1] = ffi.string(ptr, total)
-    n_bytes = n_bytes + total
-    return total
-  end
 
   local header_list = build_headers(spec.headers)
   local setup_err
   local function setup()
     setopt_str(handle, OPT.URL, url)
-    setopt_cb(handle, OPT.WRITEFUNCTION, on_write)   -- 非变参 + callback 类型 → FFI 生成 trampoline
+    setopt_cb(handle, OPT.WRITEFUNCTION, get_on_write_c())   -- 复用预 cast 的 C 指针 = 零 trampoline 增长
     if body ~= '' then
       setopt_long(handle, OPT.POST, 1)
       setopt_str(handle, OPT.POSTFIELDS, body)
@@ -197,13 +224,13 @@ local function http_post(spec)
     return nil, 'lua error during curl setup: ' .. setup_err
   end
   if rc ~= 0 then
-    if oob then
-      return nil, string.format('CURL_WRITE_ERROR(23): response exceeded max_size %d bytes', max_size)
+    if _oob then
+      return nil, string.format('CURL_WRITE_ERROR(23): response exceeded max_size %d bytes', _max_size)
     end
     local msg = ffi.string(curl.curl_easy_strerror(rc))
     return nil, string.format('CURL %d: %s', rc, msg)
   end
-  local payload = table.concat(collected, '')
+  local payload = table.concat(_collected, '')
   if code_n < 200 or code_n >= 300 then
     return nil, string.format('HTTP %d from %s: %s', code_n, url, payload:sub(1, 400))
   end

@@ -65,12 +65,40 @@
 --       未给 key → 日期置 [**DATE**] 占位符
 --     → 返回 JSON：{ text 脱敏后文本, total 命中数, counts 分类计数, map 字典词→占位符,
 --       date_mode, num_min, chars_in, note }。同一原文 → 同一占位符；字典编号按
---       **字典顺序**（不是行内首现序）⇒ 同一字典跑多行文本时，同一人恒得同一编号，
---       跨行可直接对齐（稳定假名）；`map` 返回的是字典全量映射。
+--       **长度降序（同长按字典序）**（不是行内首现序）⇒ 同一字典跑多行文本时，同一人
+--       恒得同一编号，跨行可直接对齐（稳定假名）；互为子串的字典词（张伟/张伟丰）
+--       先长后短，短词不再切碎长词；`map` 返回的是字典全量映射。
 --     内置模式：邮箱 / URL / IPv4 / 日期（-、/、.、年月日 四形态，校验月日合法）/
 --       身份证（15、18、17+X）/ 手机（1[3-9] + 9 位）/ 银行卡（16–19 位）/ 未分类长数字串。
+--     边界纪律（maskit 移植）：IPv4/邮箱/数字串均带左右词边界校验——版本号
+--       （v1.2.3.4、10.2.3.4.jar、1.2.3.4.5 五段）、git diff 行内邮箱（+user@x）、
+--       连接串 user:pass@host 的局部均不再误命中。
 --     诚实边界：只覆盖规则表列出的模式 + 所给字典，**未匹配的自由文本不保证无 PHI**
---     （note 字段里显式声明，不假装全覆盖）。
+--     （note 字段里显式声明，不假装全覆盖）；凭据/密钥/内网拓扑不在此列 → 用 redact_secrets。
+--   【凭据/密钥/内网拓扑脱敏】（maskit 规则族移植；机器侧敏感物，与 redact_text 分工）
+--   op='redact_secrets'：p.v 自由文本、p.extra（可选）补充词数组（内部自研前缀/代号，
+--     字面查找、长词优先）。规则表：PEM 私钥整块 / 厂商 API key 前缀
+--     （GitHub ghp·github_pat、Google AIza、阿里云 LTAI、腾讯云 AKID、Slack xox、
+--     Stripe [sr]k_(live|test)、飞书 cli_、钉钉 ding、AWS AKIA/ASIA、OpenAI sk-、
+--     Azure ah-）/ JWT（eyJ 三段）/ Bearer token 值 / 连接串 scheme://u:***@host 的
+--     **密码段**（保留 scheme/user/host，下游仍可读形态）/ 键值形态秘密
+--     （password=/密码：/api_key = 等，中英文键名都认，值须含数字或特殊符号）/
+--     USCC 统一社会信用代码（GB 32100-2015 MOD31 校验位）/ 内网 IPv4
+--     （10.x、172.16-31、192.168、169.254、CGNAT 100.64-127）。
+--     占位符：[**KEY**]/[**JWT**]/[**TOKEN**]/[**PEM**]/[**PASS**]/[**SECRET**]/
+--     [**USCC**]/[**IP**]。→ 返回 JSON：{ text, total, counts, note }（不可逆，
+--     原文不出本函数——这是设计：凭据不需要还原，需要的是不出网）。
+--     诚实边界：凭据形态是开放集，未收录的前缀不命中 → p.extra 补（note 里声明）。
+--   【可逆还原】（redact_text 的对称 op；maskit 的 visible-failure 契约移植）
+--   op='restore_text'：p.v 脱敏后文本、p.map（redact_text 返回的字典词→占位符全量映射）、
+--     p.key/p.dates（可选，与 redact_text 同 salt/days 时，把 shifted_dates 里的
+--     平移日期串逐串回移；偏移由 key 确定性推出，库保持无状态）。
+--     → 返回 JSON：{ text, restored 字典词还原数, dates_undone 回移日期数,
+--       unresolved 残留占位符数, note }。
+--     **map 查不到的占位符（[**EMAIL**]/[**IP**]/[**NUM**]/secrets 系）原样保留并计入
+--     unresolved——让人看见，绝不静默吞**（这类占位符不带原文信息，本就不可能还原）。
+--     诚实边界：平移还原按串匹配，若原文恰好存在与平移结果相同的未脱敏日期串，
+--     会被一并回移（罕见，note 里声明）。
 --
 -- Usage (duckdb-luajit, scalar mode):
 --   install:  SELECT * FROM luajit_module(mode:='install', sql_name:='privacy');
@@ -85,6 +113,11 @@
 --             SELECT luajit_s('privacy', {v:'张三', kind:'name', mode:'hash', salt:'k1', op:'mask_cn'}); → '张#<8位指纹>'
 --   dateshift:SELECT luajit_s('privacy', {v:'2150-03-04', key:'10001', days:180, op:'dateshift'});
 --             → 如 '2150-01-12'（同 key 恒定偏移）；with_delta=true → '2150-01-12|-51'
+--   redact_secrets: SELECT luajit_s('privacy', {v:'token ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZ12 密码=abc12345', op:'redact_secrets'});
+--             → 返回 JSON：{ text='token [**KEY**] 密码=[**SECRET**]', total=2, counts={key=1, kv=1}, ... }
+--   restore_text:   SELECT luajit_s('privacy', {v:'[**Name1**] 的 [**EMAIL**]', map={['王五']='[**Name1**]'}, op:'restore_text'});
+--             → 返回 JSON：{ text='王五 的 [**EMAIL**]', restored=1, unresolved=1, ... }
+--             （[**EMAIL**] 不带原文信息 → 保留在 unresolved，绝不静默吞）
 
 local privacy = {}
 local json_encode  -- 前向声明（定义在文件后部，调用发生在 chunk 加载完成后）
@@ -845,16 +878,36 @@ local function civil_from_days(z)
   return y + ((m <= 2) and 1 or 0), m, d
 end
 
--- 解析 'YYYY-MM-DD[...]' 并做日历合法性校验（拒绝 2023-02-30）
-local function parse_ymd(v)
-  local y, m, d, rest = v:match('^(%d%d%d%d)%-(%d%d)%-(%d%d)(.*)$')
+-- 日期时间后缀（可选 HH:MM:SS，随平移原样保留）
+local function fmt_dt(y, m, d, sep, tsuffix)
+  -- ⚠ 空串是 truthy：`tsuffix and (...)` 会把 '' 当有值 → 多一个尾随空格
+  local t = (tsuffix ~= nil and tsuffix ~= '') and (' ' .. tsuffix) or ''
+  if sep == 'cn' then return string.format('%04d年%02d月%02d日%s', y, m, d, t) end
+  return string.format('%04d%s%02d%s%02d%s', y, sep, m, sep, d, t)
+end
+
+-- 解析 'YYYY-MM-DD[ HH:MM:SS]'（sep ∈ '-','/','.'），返回 y,m,d,时间后缀（无则 ''）
+local function parse_ymd_ts(v, sep)
+  local y, m, d, ts
+  if sep == '-' then y, m, d, ts = v:match('^(%d%d%d%d)%-(%d%d?)%-(%d%d?)(.*)$')
+  elseif sep == '/' then y, m, d, ts = v:match('^(%d%d%d%d)/(%d%d?)/(%d%d?)(.*)$')
+  else y, m, d, ts = v:match('^(%d%d%d%d)%.(%d%d?)%.(%d%d?)(.*)$') end
   if not y then return nil end
+  ts = ts or ''
+  -- 保留前导空格（输出时与日期拼成 'YYYY-MM-DD HH:MM:SS'）；
+  -- 非空格开头（'2020-01-01note' 无空格）→ 拒绝（宁拒勿错移）
+  if ts:sub(1, 1) ~= ' ' then ts = '' end
+  if ts == ' ' then ts = '' end   -- 尾部单空格 = 无时间后缀
+  -- 只认纯时间后缀（HH:MM:SS / HH:MM）。⚠ 不用 (%:%d%d?)? 可选分组——
+  -- 紧跟量词时 5.4 pattern 引擎有 quirk（"10:30:00" 失配），用无组 or 两分支
+  if ts ~= '' and not (ts:sub(2):match('^%d%d?%:%d%d?%:%d%d?$')
+                       or ts:sub(2):match('^%d%d?%:%d%d?$')) then return nil end
   y, m, d = tonumber(y), tonumber(m), tonumber(d)
   if m < 1 or m > 12 or d < 1 or d > 31 then return nil end
   local rz = days_from_civil(y, m, d)
   local y2, m2, d2 = civil_from_days(rz)
   if y2 ~= y or m2 ~= m or d2 ~= d then return nil end  -- 回环校验：剔除非法日历日
-  return y, m, d, rest
+  return y, m, d, ts
 end
 
 -- key → 偏移天数 ∈ [-days, days]
@@ -866,12 +919,12 @@ end
 local function dateshift(p)
   local v = tostring(p.v or '')
   if v == '' then return 'null' end
-  local y, m, d, rest = parse_ymd(v)
+  local y, m, d, ts = parse_ymd_ts(v, '-')
   if not y then return 'null' end
   local days = math.floor(math.abs(tonumber(p.days) or 180))
   local off = days == 0 and 0 or key_offset(p.key, p.salt, days)
   local ny, nm, nd = civil_from_days(days_from_civil(y, m, d) + off)
-  local out = string.format('%04d-%02d-%02d%s', ny, nm, nd, rest)
+  local out = fmt_dt(ny, nm, nd, '-', ts)
   if p.with_delta then return out .. '|' .. off end
   return out
 end
@@ -933,12 +986,44 @@ local function redact_free(marks, s0, e0)
   return true
 end
 
-local function redact_add_pattern(marks, s, pat, id)
+-- 词边界检查（Lua pattern 无前后向断言，在匹配时手动校验）——
+-- 移植自 maskit 的边界断言纪律：误报（版本号 v1.2.3.4、git diff 的 +user@x、
+-- 文件名 10.2.3.4.jar）都是边界问题，不是模式问题。
+-- 左边界：前一字拒绝词字符；ip 额外拒绝点/字母/连字符语境（五段编号、包名），
+--         email 额外拒绝词字符/点/冒号（diff 行内前缀、user:pass@host 连接串）
+local function bnd_ok_l(kind, s, s0)
+  local c = s:sub(s0 - 1, s0 - 1)
+  if c == '' then return true end
+  if c:match('[%w_]') then return false end
+  if kind == 'ip' then
+    if c == '.' then return false end            -- 1.2.3.4.5 五段版本号/编号
+    if c:match('%a') or c == '-' then return false end  -- lib-1.2.3.4 / v1.2.3.4
+  elseif kind == 'email' then
+    if c == '.' then return false end            -- xxx.y@z 是完整邮箱的局部
+    if c == ':' then return false end            -- 连接串 user:pass@host
+  end
+  return true
+end
+-- 右边界：后一字拒绝词字符；ip 额外拒绝点号文件后缀/连字符构建号
+local function bnd_ok_r(kind, s, e0)
+  local c = s:sub(e0 + 1, e0 + 1)
+  if c == '' then return true end
+  if c:match('[%w_]') then return false end
+  if kind == 'ip' then
+    if c == '.' then return false end             -- 1.2.3.4.5
+    if c:match('%a') then return false end        -- 10.2.3.4.jar
+    if c == '-' or c == '_' then return false end -- 192.168.1.1-beta 构建号
+  end
+  return true
+end
+
+local function redact_add_pattern(marks, s, pat, id, bnd_kind)
   local pos = 1
   while true do
     local s0, e0 = s:find(pat, pos)
     if not s0 then break end
-    if redact_free(marks, s0, e0) then
+    local ok = (not bnd_kind) or (bnd_ok_l(bnd_kind, s, s0) and bnd_ok_r(bnd_kind, s, e0))
+    if ok and redact_free(marks, s0, e0) then
       marks[#marks + 1] = { s = s0, e = e0, id = id, ph = REDACT_PH[id] }
     end
     pos = e0 + 1
@@ -982,7 +1067,7 @@ local function redact_add_digit_runs(marks, s, num_min)
     elseif n >= num_min then
       id = 'longnum'
     end
-    if id and redact_free(marks, s0, e0) then
+    if id and bnd_ok_l('num', s, s0) and bnd_ok_r('num', s, e0) and redact_free(marks, s0, e0) then
       marks[#marks + 1] = { s = s0, e = e0, id = id, ph = REDACT_PH[id] }
     end
     pos = e0 + 1
@@ -991,19 +1076,23 @@ end
 
 -- 字典词：字面查找（非模式），同原文共用同一编号
 local function redact_add_dict(marks, s, dict, map, order)
-  for _, w in ipairs(dict or {}) do
-    local nm = tostring(w)
-    if nm ~= '' then
-      if not map[nm] then
-        order[#order + 1] = nm
-        map[nm] = '[**Name' .. #order .. '**]'
+  -- 长度降序（同长按字典序）：互为子串的字典词（张伟 / 张伟丰）必须先长后短，
+  -- 否则短词先占区间，长词命中的是残片（先到先得会切碎）。
+  local words = {}
+  for _, w in ipairs(dict or {}) do words[#words + 1] = tostring(w) end
+  table.sort(words, function(a, b) return (#a > #b) or (#a == #b and a < b) end)
+  for _, w in ipairs(words) do
+    if w ~= '' then
+      if not map[w] then
+        order[#order + 1] = w
+        map[w] = '[**Name' .. #order .. '**]'
       end
       local pos = 1
       while true do
-        local s0, e0 = s:find(nm, pos, true)
+        local s0, e0 = s:find(w, pos, true)
         if not s0 then break end
         if redact_free(marks, s0, e0) then
-          marks[#marks + 1] = { s = s0, e = e0, id = 'name', ph = map[nm] }
+          marks[#marks + 1] = { s = s0, e = e0, id = 'name', ph = map[w] }
         end
         pos = e0 + 1
       end
@@ -1040,14 +1129,16 @@ local function redact_text(p)
   local salt = p.salt or 'dateshift'
 
   -- 优先级：结构化模式（邮箱/URL/IP/日期 —— 占位符最具体、整体覆盖）→ 字典 → 数字串
-  redact_add_pattern(marks, s, '[%w%.%-_%+]+@[%w%.%-]+%.[%a][%a]+', 'email')
+  -- 邮箱/IPv4 带边界校验（版本号、diff 行内、连接串局部不误报，见 bnd_ok_l/r）
+  redact_add_pattern(marks, s, '([%w_][%w%.%-_%+]*@[%w%.%-]+%.[%a][%a]+)', 'email', 'email')
   redact_add_pattern(marks, s, 'https?://[%w%.%-_/%?=&#:~%%%+]+', 'url')
   do
     local pos = 1
     while true do
       local s0, e0 = s:find('%d+%.%d+%.%d+%.%d+', pos)
       if not s0 then break end
-      if redact_valid_ipv4(s:sub(s0, e0)) and redact_free(marks, s0, e0) then
+      if bnd_ok_l('ip', s, s0) and bnd_ok_r('ip', s, e0)
+         and redact_valid_ipv4(s:sub(s0, e0)) and redact_free(marks, s0, e0) then
         marks[#marks + 1] = { s = s0, e = e0, id = 'ipv4', ph = REDACT_PH.ipv4 }
       end
       pos = e0 + 1
@@ -1061,11 +1152,16 @@ local function redact_text(p)
   -- 重建：按位置排序后拼接（重叠已在采集阶段排除）
   table.sort(marks, function(a, b) return a.s < b.s end)
   local out, cur = {}, 1
+  local shifted_dates = {}   -- 平移写入的日期串（restore_text 回移用）
   for _, m in ipairs(marks) do
     if m.s > cur then out[#out + 1] = s:sub(cur, m.s - 1) end
     local rep = m.ph
     if m.id == 'date' and shift then
-      rep = redact_shift_date(s:sub(m.s, m.e), m.sep, p.key, salt, days) or m.ph
+      local shifted = redact_shift_date(s:sub(m.s, m.e), m.sep, p.key, salt, days)
+      if shifted then
+        rep = shifted
+        shifted_dates[#shifted_dates + 1] = shifted
+      end
     end
     out[#out + 1] = rep
     cur = m.e + 1
@@ -1079,10 +1175,416 @@ local function redact_text(p)
     total = #marks,
     counts = counts,
     map = map,
+    shifted_dates = shifted_dates,
     date_mode = shift and 'shift' or 'placeholder',
     num_min = num_min,
     chars_in = #s,
     note = 'rule-based: covers listed patterns + given dict only; unmatched free text is not guaranteed PHI-free',
+  })
+end
+
+-- ======================================================================
+-- 凭据/密钥/内网拓扑脱敏（redact_secrets）—— maskit 规则族移植
+--   与 redact_text 的分工：redact_text 管 PII/PHI（人、证、卡、日期），
+--   本 op 管机器侧敏感物（API key、私钥、token、连接串密码、USCC、内网 IP）。
+--   规则=数据（表驱动，可审计）；占位符风格与 redact_text 一致（[**X**]）。
+--   边界纪律同 redact_text（maskit 移植）：左/右拒绝词字符，防包名、构建号。
+--   诚实边界：凭据形态是开放集，本表只覆盖主流厂商前缀与键值形态；
+--   未收录的凭据（如内部自研 token 前缀）不会命中 —— 用 redact_text 的
+--   dict 字典词或 redact_secrets 的 extra 参数补。
+-- ======================================================================
+local SEC_PH = {
+  key = '[**KEY**]', jwt = '[**JWT**]', token = '[**TOKEN**]',
+  pem = '[**PEM**]', connstr = '[**PASS**]', uscc = '[**USCC**]',
+  kv = '[**SECRET**]', ipint = '[**IP**]',
+}
+
+-- 形态固定的厂商凭据前缀。⚠ Lua pattern 无 {n,} 区间量词 → 值段用 `+`，
+-- 长度下/上界由 min/max 在代码侧校验（find 后按整串长度过滤）。
+local SEC_RULES = {
+  { id = 'key',  kind = 'w', pat = 'gh[puoshr]_[%w_]+', min = 20 },  -- GitHub (ghp/gho/ghu/ghs/ghr；⚠ Lua 无 | 选择符)
+  { id = 'key',  kind = 'w', pat = 'github_pat_[%w_]+', min = 50 },
+  { id = 'key',  kind = 'w', pat = 'AIza[0-9A-Za-z_%-]+', min = 35, max = 38 },
+  { id = 'key',  kind = 'w', pat = 'LTAI[%w]+', min = 12, max = 20 },
+  { id = 'key',  kind = 'w', pat = 'AKID[%w]+', min = 13, max = 32 },
+  { id = 'key',  kind = 'w', pat = 'xox[baprs]-[%w%-]+', min = 10 },
+  { id = 'key',  kind = 'w', pat = '[sr]k_live_[%w]+', min = 20 },   -- Stripe（⚠ 拆 live/test 两条，Lua 无 |）
+  { id = 'key',  kind = 'w', pat = '[sr]k_test_[%w]+', min = 20 },
+  { id = 'key',  kind = 'w', pat = 'cli_[%l%d]+', min = 16 },
+  { id = 'key',  kind = 'w', pat = 'ding[%l%d]+', min = 6 },
+  { id = 'key',  kind = 'w', pat = 'A[KS]IA[%w]+', min = 20, max = 20 },  -- AWS (AKIA/ASIA)
+  { id = 'key',  kind = 'w', pat = 'sk-[A-Za-z0-9_%-]+', min = 16 },
+  { id = 'key',  kind = 'w', pat = 'ah-[A-Za-z0-9_%-]+', min = 16 },
+  { id = 'jwt',  kind = 'w', pat = 'eyJ[%w%-_]+%.[%w%-_]+%.[%w%-_]+', min = 20 },
+}
+
+-- USCC 统一社会信用代码：GB 32100-2015 MOD31 校验位（字符集排除 I/O/S/V/Z）
+local USCC_CHARS = '0123456789ABCDEFGHJKLMNPQRTUWXY'
+local USCC_WEIGHTS = { 1, 3, 9, 27, 19, 26, 16, 17, 20, 29, 25, 13, 8, 24, 10, 30, 28 }
+local function uscc_ok(v)
+  if #v ~= 18 then return false end
+  local total = 0
+  for i = 1, 17 do
+    -- ⚠ sub(i,i) 必须双参——sub(i) 单参返回「从 i 到末尾」的整串，
+    -- find 会按子串找 → 校验恒真（实测踩坑）
+    local idx = USCC_CHARS:find(v:sub(i, i), 1, true)
+    if not idx then return false end
+    total = total + USCC_WEIGHTS[i] * (idx - 1)   -- 0 基字符值（与 GB 32100 一致）
+  end
+  return USCC_CHARS:sub(((31 - total % 31) % 31) + 1, ((31 - total % 31) % 31) + 1) == v:sub(18, 18)
+end
+
+-- IPv4 候选通用扫描：模式只负责抓"四段点分数字"，段合法性与私网判定在代码侧
+-- （⚠ 实测教训：Lua pattern **没有 `|` 选择符**——它被当字面竖线，所以
+-- 172%.(1[6-9]|2%d|3[01]) 这类"正则写法"永远不命中；形态判断一律放代码里）
+local function valid_ipv4_str(t)
+  local n = 0
+  for oct in t:gmatch('%d+') do
+    n = n + 1
+    local v = tonumber(oct)
+    if v > 255 or (#oct > 1 and oct:sub(1, 1) == '0') then return false end
+  end
+  return n == 4
+end
+local function is_private_ipv4(t)
+  local a, b, c, d = t:match('^(%d+)%.(%d+)%.(%d+)%.(%d+)$')
+  if not a then return false end
+  a, b, c, d = tonumber(a), tonumber(b), tonumber(c), tonumber(d)
+  if a == 10 then return true end
+  if a == 172 and b >= 16 and b <= 31 then return true end
+  if a == 192 and b == 168 then return true end
+  if a == 169 and b == 254 then return true end
+  if a == 100 and b >= 64 and b <= 127 then return true end  -- CGNAT（Tailscale/ZeroTier）
+  return false
+end
+
+local function sec_add_rules(marks, s, rules)
+  for _, r in ipairs(rules) do
+    local pos = 1
+    while true do
+      local s0, e0 = s:find(r.pat, pos)
+      if not s0 then break end
+      local len = e0 - s0 + 1
+      if (not r.min or len >= r.min) and (not r.max or len <= r.max) then
+        if bnd_ok_l(r.kind, s, s0) and bnd_ok_r(r.kind, s, e0)
+           and redact_free(marks, s0, e0) then
+          marks[#marks + 1] = { s = s0, e = e0, id = r.id, ph = SEC_PH[r.id] }
+        end
+      end
+      pos = e0 + 1
+    end
+  end
+end
+
+-- PEM 私钥整块（多行）：BEGIN 头限定已知算法标签，整块到 END 标记
+local PEM_HDRS = { [''] = true, ['RSA '] = true, ['EC '] = true,
+                   ['DSA '] = true, ['OPENSSH '] = true, ['PGP '] = true }
+local function sec_add_pem(marks, s)
+  local pos = 1
+  while true do
+    local s0, e0, hdr = s:find('-----BEGIN (.-)PRIVATE KEY-----', pos)
+    if not s0 then break end
+    pos = e0 + 1
+    if PEM_HDRS[hdr] then
+      local es0 = s:find('-----END', e0)
+      if es0 and (es0 - s0) >= 20 then
+        local e1 = s:find('PRIVATE KEY-----', es0)
+        if e1 and redact_free(marks, s0, e1 + 15) then
+          marks[#marks + 1] = { s = s0, e = e1 + 15, id = 'pem', ph = SEC_PH.pem }
+        end
+      end
+    end
+  end
+end
+
+-- Bearer token：只掩 token 值（保留 Bearer 字样，语义可读）。⚠ {20,} 是非法 Lua
+-- pattern → 值段用 `+`，长度下界 20 在代码侧校验。
+local function sec_add_bearer(marks, s)
+  local pos = 1
+  while true do
+    local s0, e0 = s:find('Bearer%s+[%w.%-+/=~-]+', pos)
+    if not s0 then break end
+    local seg = s:sub(s0, e0)
+    local tok = seg:match('Bearer%s+(.+)$')
+    -- ⚠ 这里不能用 plain=true（字符类会被当字面串）——用 pattern 判值段非空即可
+    if tok and #tok >= 20 and tok:match('[%w%-+/=~-]') then
+      local off = seg:find(tok, 1, true)
+      if off then
+        local vs, ve = s0 + off - 1, s0 + off - 1 + #tok - 1
+        if redact_free(marks, vs, ve) then
+          marks[#marks + 1] = { s = vs, e = ve, id = 'token', ph = SEC_PH.token }
+        end
+      end
+    end
+    pos = e0 + 1
+  end
+end
+
+-- 连接串：scheme://user:pass@host —— 只掩密码段（保留 scheme/user/host，
+-- 下游仍可读「这是连接串」；与 maskit 同取舍）
+local function sec_add_connstr(marks, s)
+  local pos = 1
+  while true do
+    -- 值段 {4,} 是非法 Lua pattern → 用 `+`，长度下界 4 在代码侧校验
+    local s0, e0, pass = s:find('[%a][%w%.%-]*://[^%s:@/]+:([^%s@/]+)@', pos)
+    if not s0 then break end
+    if #pass >= 4 then
+      local off = s:sub(s0, e0):find(pass, 1, true)
+      if off then
+        local vs, ve = s0 + off - 1, s0 + off - 1 + #pass - 1
+        if redact_free(marks, vs, ve) then
+          marks[#marks + 1] = { s = vs, e = ve, id = 'connstr', ph = SEC_PH.connstr }
+        end
+      end
+    end
+    pos = e0 + 1
+  end
+end
+
+-- 键值形态秘密（password=/密码：/api_key = 等）：只掩值。
+-- ⚠ 两个移植坑：① Lua pattern 无 {6,64} 区间量词 → 值段用 `+`，长度 6-64 代码侧校验；
+--              ② `[%w_]+` 匹配不了 CJK 中文键 → 中文关键词走字面查找路径。
+-- 键名中英文都认；值须含数字或特殊符号（防 CamelCase 标识符误报，maskit 实测教训）。
+local KV_KEYWORDS = {
+  password = true, passwd = true, pwd = true, secret = true, token = true,
+  apikey = true, accesskey = true, privatekey = true,
+}
+-- 中文关键词（字面，无规范化变体）
+local KV_ZH_KEYS = {
+  '密码', '口令', '令牌', '密钥', '秘钥', '密匙', '凭据', '凭证', '私钥',
+  '授权码', '访问密钥', '接口密钥',
+}
+local function kv_key_ok(k)
+  local n = k:lower():gsub('[%_%-]', '')
+  return KV_KEYWORDS[n] ~= nil
+end
+-- 值校验：长度 6-64 + 含数字或特殊符号
+local function kv_val_ok(v)
+  if #v < 6 or #v > 64 then return false end
+  return v:match('[0-9!@#$%%^&*]') ~= nil
+end
+-- 值字符类（含特殊符号，$/% 在 pattern 里需转义）
+local KV_VAL_PAT = '[%w!@#$%%^&*_~+=-]+'
+local function sec_add_kv(marks, s)
+  -- 路径 1：英文键（键名规范化后查表）
+  local pos = 1
+  while true do
+    local s0, e0, k, v = s:find('([%w_]+)[%s]*[=:][%s]*(' .. KV_VAL_PAT .. ')', pos)
+    if not s0 then break end
+    if kv_key_ok(k) and kv_val_ok(v) then
+      local off = s:sub(s0, e0):find(v, 1, true)
+      if off then
+        local vs, ve = s0 + off - 1, s0 + off - 1 + #v - 1
+        if redact_free(marks, vs, ve) then
+          marks[#marks + 1] = { s = vs, e = ve, id = 'kv', ph = SEC_PH.kv }
+        end
+      end
+    end
+    pos = e0 + 1
+  end
+  -- 路径 2：中文键（字面查找 → 紧随的分隔符 → 值；[%w_] 匹配不了 CJK，必须字面）
+  for _, kw in ipairs(KV_ZH_KEYS) do
+    local p2 = 1
+    while true do
+      local ks = s:find(kw, p2, true)
+      if not ks then break end
+      local ke = ks + #kw - 1
+      local tail = s:sub(ke + 1)
+      -- 分隔符半角全角都认；⚠ 不能写 [:：=] 字符类——：是 3 字节 UTF-8，
+      -- 字符类匹配会切字节，值起点偏移 2
+      local p1 = tail:find(':', 1, true)
+      local pfull = tail:find('：', 1, true)   -- ⚠ 别叫 p2（会遮蔽循环游标 → 死循环）
+      local p3 = tail:find('=', 1, true)
+      -- ⚠ 不能用 ipairs({p1,pfull,p3})——任一为 nil 时 ipairs 遇 nil 即停，
+      -- 会漏掉后面的候选（如只有全角冒号命中）→ 逐个显式比较
+      local sep_start
+      if p1 and (not sep_start or p1 < sep_start) then sep_start = p1 end
+      if pfull and (not sep_start or pfull < sep_start) then sep_start = pfull end
+      if p3 and (not sep_start or p3 < sep_start) then sep_start = p3 end
+      local sep_end = (pfull and sep_start == pfull) and (pfull + 2) or (sep_start and (sep_start + 1))
+      if sep_start then
+        -- ⚠ KV_VAL_PAT 无捕获组 → find 只回 (起点, 终点)，值须 sub 出来
+        local vstr_start, vstr_end = tail:find(KV_VAL_PAT, sep_end + 1)
+        if vstr_start then
+          local vstr = tail:sub(vstr_start, vstr_end)
+          if kv_val_ok(vstr) then
+            local vs_abs = ke + 1 + vstr_start - 1
+            local ve_abs = ke + 1 + vstr_end - 1
+            if redact_free(marks, vs_abs, ve_abs) then
+              marks[#marks + 1] = { s = vs_abs, e = ve_abs, id = 'kv', ph = SEC_PH.kv }
+            end
+          end
+        end
+      end
+      p2 = ke + 1
+    end
+  end
+end
+
+-- USCC：字母数字混合 18 位（redact_text 的 %d+ 够不着），MOD31 校验位压误报
+-- 字符集（GB 32100-2015，排除 I/O/S/V/Z）；位置结构 2+6+10 用字符类无法区分，
+-- 统一按全字符集 18 位抓候选，靠校验位把随机串误伤压到 1/31 以下（maskit 同策略）
+local USCC_PAT = '([%dABCDEFGHJKLMNPQRTUWXY][%dABCDEFGHJKLMNPQRTUWXY][%dABCDEFGHJKLMNPQRTUWXY][%dABCDEFGHJKLMNPQRTUWXY][%dABCDEFGHJKLMNPQRTUWXY][%dABCDEFGHJKLMNPQRTUWXY][%dABCDEFGHJKLMNPQRTUWXY][%dABCDEFGHJKLMNPQRTUWXY][%dABCDEFGHJKLMNPQRTUWXY][%dABCDEFGHJKLMNPQRTUWXY][%dABCDEFGHJKLMNPQRTUWXY][%dABCDEFGHJKLMNPQRTUWXY][%dABCDEFGHJKLMNPQRTUWXY][%dABCDEFGHJKLMNPQRTUWXY][%dABCDEFGHJKLMNPQRTUWXY][%dABCDEFGHJKLMNPQRTUWXY][%dABCDEFGHJKLMNPQRTUWXY][%dABCDEFGHJKLMNPQRTUWXY])'
+local function sec_add_uscc(marks, s)
+  local pos = 1
+  while true do
+    local s0, e0, c = s:find(USCC_PAT, pos)
+    if not s0 then break end
+    if bnd_ok_l('w', s, s0) and bnd_ok_r('w', s, e0)
+       and uscc_ok(c) and redact_free(marks, s0, e0) then
+      marks[#marks + 1] = { s = s0, e = e0, id = 'uscc', ph = SEC_PH.uscc }
+    end
+    pos = e0 + 1
+  end
+end
+
+-- 内网 IP：通用 IPv4 候选扫描 + ip 边界 + 段合法 + 代码侧私网判定
+local function sec_add_ipint(marks, s)
+  local pos = 1
+  while true do
+    local s0, e0 = s:find('%d+%.%d+%.%d+%.%d+', pos)
+    if not s0 then break end
+    local cand = s:sub(s0, e0)
+    if bnd_ok_l('ip', s, s0) and bnd_ok_r('ip', s, e0)
+       and valid_ipv4_str(cand) and is_private_ipv4(cand)
+       and redact_free(marks, s0, e0) then
+      marks[#marks + 1] = { s = s0, e = e0, id = 'ipint', ph = SEC_PH.ipint }
+    end
+    pos = e0 + 1
+  end
+end
+
+local function redact_secrets(p)
+  local s = tostring(p.v or '')
+  local marks = {}
+  sec_add_pem(marks, s)
+  sec_add_rules(marks, s, SEC_RULES)
+  sec_add_bearer(marks, s)
+  sec_add_connstr(marks, s)
+  sec_add_kv(marks, s)
+  sec_add_uscc(marks, s)
+  sec_add_ipint(marks, s)
+  -- 调用方补充词（内部自研前缀/代号）：字面查找，长词优先（同 redact_add_dict 纪律）
+  local extra = p.extra
+  if type(extra) == 'table' and #extra > 0 then
+    local words = {}
+    for _, w in ipairs(extra) do words[#words + 1] = tostring(w) end
+    table.sort(words, function(a, b) return (#a > #b) or (#a == #b and a < b) end)
+    for _, w in ipairs(words) do
+      if w ~= '' then
+        local pos = 1
+        while true do
+          local s0, e0 = s:find(w, pos, true)
+          if not s0 then break end
+          if redact_free(marks, s0, e0) then
+            marks[#marks + 1] = { s = s0, e = e0, id = 'key', ph = SEC_PH.key }
+          end
+          pos = e0 + 1
+        end
+      end
+    end
+  end
+  table.sort(marks, function(a, b) return a.s < b.s end)
+  local out, cur = {}, 1
+  for _, m in ipairs(marks) do
+    if m.s > cur then out[#out + 1] = s:sub(cur, m.s - 1) end
+    out[#out + 1] = m.ph
+    cur = m.e + 1
+  end
+  if cur <= #s then out[#out + 1] = s:sub(cur) end
+  local counts = {}
+  for _, m in ipairs(marks) do counts[m.id] = (counts[m.id] or 0) + 1 end
+  return json_encode({
+    text = table.concat(out),
+    total = #marks,
+    counts = counts,
+    note = 'rule-based: listed vendor prefixes + key=value + connstr password + USCC + private IPv4 only; '
+      .. 'unlisted credential shapes (e.g. in-house token prefixes) are not covered - use p.extra',
+  })
+end
+
+-- ======================================================================
+-- 可逆还原（restore_text）—— redact_text 的对称 op（maskit 契约移植）
+--   redact_text 返回的 map（字典词→占位符全量映射）+ 本次写入的平移日期列表
+--   （dates 字段）即为还原所需的全部状态；库保持无状态，状态由调用方传入。
+--   还原范围（且仅这些）：
+--     1) map 条目：占位符 → 原文（gmatch 计数）；
+--     2) 平移日期：给了 p.key（与 redact_text 同 salt/days）且 p.dates 提供时，
+--        把本次平移写入的日期逐串减回偏移（偏移由 key 确定性推出）。
+--   未覆盖的占位符（[**EMAIL**]/[**IP**]/[**NUM**]/secrets 系）不带原文信息，
+--   **原样保留并计入 unresolved** —— 让人看见，绝不静默吞（maskit 契约）。
+--   注意：平移还原按串匹配，若原文中恰好存在与平移结果相同的未脱敏日期串，
+--   会被一并回移（罕见；note 里声明）。
+-- ======================================================================
+local function parse_date_like(v)
+  local y, m, d = v:match('^(%d%d%d%d)%-(%d%d?)%-(%d%d?)$')
+  if y then return y, m, d, '-' end
+  y, m, d = v:match('^(%d%d%d%d)/(%d%d?)/(%d%d?)$')
+  if y then return y, m, d, '/' end
+  y, m, d = v:match('^(%d%d%d%d)%.(%d%d?)%.(%d%d?)$')
+  if y then return y, m, d, '.' end
+  y, m, d = v:match('^(%d%d%d%d)年(%d%d?)月(%d%d?)日$')
+  if y then return y, m, d, 'cn' end
+  return nil
+end
+
+local function fmt_date_like(y, m, d, sep)
+  if sep == 'cn' then return string.format('%04d年%02d月%02d日', y, m, d) end
+  return string.format('%04d%s%02d%s%02d', y, sep, m, sep, d)
+end
+
+-- 字面串替换（find 的 plain 模式，日期串里的 . 不会被当模式元字符）
+local function replace_all(s, old, new)
+  local out, cur, c = {}, 1, 0
+  local pos = 1
+  while true do
+    local s0, e0 = s:find(old, pos, true)
+    if not s0 then break end
+    if s0 > cur then out[#out + 1] = s:sub(cur, s0 - 1) end
+    out[#out + 1] = new
+    c = c + 1
+    pos = e0 + 1
+    cur = e0 + 1
+  end
+  if cur <= #s then out[#out + 1] = s:sub(cur) end
+  return table.concat(out), c
+end
+
+local function restore_text(p)
+  local s = tostring(p.v or '')
+  local restored = 0
+  for w, ph in pairs(p.map or {}) do
+    local local_c
+    s, local_c = replace_all(s, tostring(ph), tostring(w))
+    restored = restored + local_c
+  end
+  local undone = 0
+  if p.key and p.key ~= '' and type(p.dates) == 'table' and #p.dates > 0 then
+    local off = key_offset(p.key, p.salt or 'dateshift',
+      math.floor(math.abs(tonumber(p.days) or 180)))
+    if off ~= 0 then
+      for _, d in ipairs(p.dates) do
+        local ds = tostring(d)
+        local y, m, dd, sep = parse_date_like(ds)
+        if y and s:find(ds, 1, true) then
+          local ny, nm, nd = civil_from_days(
+            days_from_civil(tonumber(y), tonumber(m), tonumber(dd)) - off)
+          local local_c
+          s, local_c = replace_all(s, ds, fmt_date_like(ny, nm, nd, sep))
+          undone = undone + local_c
+        end
+      end
+    end
+  end
+  local unresolved = 0
+  for _ in s:gmatch('%[%*%*[%w]+%*%*%]') do unresolved = unresolved + 1 end
+  return json_encode({
+    text = s,
+    restored = restored,
+    dates_undone = undone,
+    unresolved = unresolved,
+    note = 'only map entries + key-based date shifts are reversible; other placeholders carry '
+      .. 'no original and are left visible (unresolved)',
   })
 end
 
@@ -1124,10 +1626,111 @@ json_encode = function(v)
   return 'null'
 end
 
+-- 极简 JSON 解码器（只支持本库 I/O 所需子集：object/array/string/number/boolean/null，
+-- 嵌套 table）。参数入口用：DuckDB 侧 luajit_s 传入 JSON 字符串，直接调用可传 table。
+local function json_decode(s)
+  local pos = 1
+  local function err(msg) error('json: ' .. msg .. ' at pos ' .. pos, 3) end
+  local function skip_ws()
+    while pos <= #s do
+      local c = s:sub(pos, pos)
+      if c == ' ' or c == '\t' or c == '\n' or c == '\r' then pos = pos + 1 else break end
+    end
+  end
+  local parse_value
+  local function parse_string()
+    if s:sub(pos, pos) ~= '"' then err('expected string') end
+    pos = pos + 1
+    local out, cur = {}, ''
+    while pos <= #s do
+      local c = s:sub(pos, pos)
+      if c == '"' then pos = pos + 1
+        out[#out + 1] = cur; cur = ''
+        local t = table.concat(out)
+        return t
+      elseif c == '\\' then
+        local n = s:sub(pos + 1, pos + 1)
+        if n == 'u' then
+          local hex = s:sub(pos + 2, pos + 5)
+          local cp = tonumber(hex, 16)
+          if cp < 128 then cur = cur .. string.char(cp)
+          elseif cp < 2048 then cur = cur .. string.char(192 + math.floor(cp / 64), 128 + cp % 64)
+          else cur = cur .. string.char(224 + math.floor(cp / 4096), 128 + math.floor(cp / 64) % 64, 128 + cp % 64) end
+          pos = pos + 6
+        else
+          local m = { ['"'] = '"', ['\\'] = '\\', ['/'] = '/', n = '\n', r = '\r', t = '\t', b = '\b', f = '\f' }
+          if m[n] then cur = cur .. m[n] end
+          pos = pos + 2
+        end
+      else
+        cur = cur .. c
+        pos = pos + 1
+      end
+    end
+    err('unterminated string')
+  end
+  parse_value = function()
+    skip_ws()
+    local c = s:sub(pos, pos)
+    if c == '{' then
+      pos = pos + 1
+      local t = {}
+      skip_ws()
+      if s:sub(pos, pos) == '}' then pos = pos + 1 return t end
+      while true do
+        skip_ws()
+        local k = parse_string()
+        skip_ws()
+        if s:sub(pos, pos) ~= ':' then err('expected :') end
+        pos = pos + 1
+        t[k] = parse_value()
+        skip_ws()
+        local d = s:sub(pos, pos)
+        if d == ',' then pos = pos + 1
+        elseif d == '}' then pos = pos + 1 return t
+        else err('expected , or }') end
+      end
+    elseif c == '[' then
+      pos = pos + 1
+      local t = {}
+      skip_ws()
+      if s:sub(pos, pos) == ']' then pos = pos + 1 return t end
+      while true do
+        t[#t + 1] = parse_value()
+        skip_ws()
+        local d = s:sub(pos, pos)
+        if d == ',' then pos = pos + 1
+        elseif d == ']' then pos = pos + 1 return t
+        else err('expected , or ]') end
+      end
+    elseif c == '"' then
+      return parse_string()
+    else
+      local num = s:match('^-?%d+%.?%d*([eE][+-]?%d+)?', pos)
+      if num and num ~= '' then
+        pos = pos + #num
+        return tonumber(num)
+      end
+      if s:sub(pos, pos + 4) == 'true' then pos = pos + 4 return true end
+      if s:sub(pos, pos + 4) == 'null' then pos = pos + 4 return nil end
+      if s:sub(pos, pos + 4) == 'fals' then pos = pos + 4 return false end
+      err('unexpected value')
+    end
+  end
+  local v = parse_value()
+  return v
+end
+
 -- ======================================================================
 -- 分发
 -- ======================================================================
 local function run(p)
+  -- 契约：DuckDB STRUCT 参数由 C 侧转成 Lua table 直达（luajit_module.c push_struct_to_lua）；
+  -- VARCHAR 参数（纯文本入口/字符串化 JSON）尝试 json_decode 兜底，失败返回 ''。
+  if type(p) == 'string' then
+    local ok, t = pcall(json_decode, p)
+    if ok and type(t) == 'table' then p = t end
+  end
   if type(p) ~= 'table' then return '' end
   local op = p.op or 'mask'
   if op == 'dp_count' then return dp_count(p)
@@ -1141,6 +1744,8 @@ local function run(p)
   elseif op == 'dateshift' then return dateshift(p)
   elseif op == 'dateoffset' then return dateoffset(p)
   elseif op == 'redact_text' then return redact_text(p)
+  elseif op == 'redact_secrets' then return redact_secrets(p)
+  elseif op == 'restore_text' then return restore_text(p)
   elseif op == 'kanon' then return kanon(p)
   elseif op == 'kanon_report' then return kanon_report(p)
   elseif op == 'dp_compose' then return dp_compose(p)

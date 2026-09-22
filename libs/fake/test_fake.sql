@@ -7,10 +7,10 @@ LOAD '/mnt/d/wsl2/luajit/build/release/luajit.duckdb_extension';
 SELECT * FROM luajit_module(mode := 'quick_compile', sql_name := 'fake',
   source := 'return dofile(''/mnt/d/wsl2/duckdb-luajit-libs/libs/fake/fake.lua'')');
 
--- 0. kinds 列表：30 个占位符
+-- 0. kinds 列表：52 个占位符（含新增 internet/finance/card/cn 等）
 SELECT json_extract(luajit_s('fake', {op: 'kinds'}), '$.count') AS n_kinds
 FROM (SELECT 1);
--- 30
+-- 52
 
 -- 1. gen 各 kind 格式正则（一次采样，seed 固定；regexp_matches 精确断言）
 SELECT
@@ -120,3 +120,36 @@ WITH r1 AS (SELECT length(val) - length(replace(val, '|', '')) + 1 AS n FROM lua
          list := '{"cols":{"z":"number.int","a":"number.int","m":"number.int"},"rows":3,"seed":1}'))
 SELECT min(n) = 3 AS all_3col FROM r1;
 -- true（列名 z,a,m 排序后仍各占一列，3 段）
+
+-- 15. 列名自动推断：cols 值留空 → 按列名猜 kind（name/email/lat/zip/created_at…）
+--     用 json_extract_string 取裸值（json_extract 带引号，前锚匹配会失败）
+SELECT
+  json_extract_string(val, '$.name')      LIKE '% %'     AS name_is_full,    -- person.full
+  json_extract_string(val, '$.email')     LIKE '%@%.%'   AS email_ok,        -- contact.email
+  json_extract_string(val, '$.phone')     LIKE '(%)%-%'  AS phone_fmt,       -- contact.phone (xxx) xxx-xxxx
+  json_extract_string(val, '$.lat')       LIKE '%.%'     AS lat_has_dot,     -- address.lat 浮点
+  json_extract_string(val, '$.zip')       GLOB '[0-9][0-9][0-9][0-9][0-9]'  AS zip5,        -- address.zip 5 位
+  json_extract_string(val, '$.amount')    GLOB '*[0-9].[0-9][0-9]'          AS amount_c2,   -- finance.amount 两位小数
+  json_extract_string(val, '$.created_at') LIKE '____-__-__ __:__:__'       AS cts_fmt      -- date.datetime
+FROM luajit_table('fake',
+  list := '{"cols":{"name":"","email":"","phone":"","lat":"","zip":"","amount":"","created_at":""},"rows":1,"seed":7,"format":"json"}');
+-- 全 true（列名→kind 自动推断生效）
+
+-- 16. 自动推断可被显式 kind 覆盖：name 显式给 person.first_cn（中文）
+SELECT json_extract_string(val, '$.name') IS NOT NULL
+       AND length(json_extract_string(val, '$.name')) >= 2 AS cn_name
+FROM luajit_table('fake',
+  list := '{"cols":{"name":"person.first_cn"},"rows":1,"seed":3,"format":"json"}');
+-- true
+
+-- 17. 新增 kind 格式断言
+SELECT
+  regexp_matches(luajit_s('fake', {op:'gen', kind:'internet.ip', seed:2}), '^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$') AS ip_ok,
+  regexp_matches(luajit_s('fake', {op:'gen', kind:'internet.url', seed:2}), '^https://www\..+\.(com|org|net|io|co|dev|app|tech|ai|xyz|info|me)$') AS url_ok,
+  regexp_matches(luajit_s('fake', {op:'gen', kind:'card.number', seed:2}), '^\d{4} \d{4} \d{4} \d{4}$') AS card_ok,
+  regexp_matches(luajit_s('fake', {op:'gen', kind:'finance.amount', seed:2}), '^\d+\.\d{2}$') AS amt_ok,
+  regexp_matches(luajit_s('fake', {op:'gen', kind:'number.float_range:10.5,99.9,2', seed:2}), '^\d+\.\d{2}$') AS fr_ok,
+  luajit_s('fake', {op:'gen', kind:'time.date_cn', seed:2}) LIKE '%年%月%日' AS dcn_ok,
+  (SELECT cast(luajit_s('fake', {op:'gen', kind:'number.float_range:0.1,0.9,3', seed:9}) AS double) BETWEEN 0.1 AND 0.9) AS fr_range_ok
+FROM (SELECT 1);
+-- 全 true

@@ -200,6 +200,11 @@ local function ri(rng, lo, hi)
   return lo + math.floor(rng() * (hi - lo + 1))
 end
 local function pick(rng, list) return list[ri(rng, 1, #list)] end
+-- 浮点区间：rf(rng, lo, hi, dp) → 字符串，dp 位小数
+local function rf(rng, lo, hi, dp)
+  if hi < lo then lo, hi = hi, lo end
+  return string.format('%.' .. (dp or 3) .. 'f', lo + rng() * (hi - lo))
+end
 local function shuffle(rng, list)
   local out = {}
   for i = 1, #list do out[i] = list[i] end
@@ -381,6 +386,74 @@ reg('uuid', function(rng)
     .. '-' .. table.concat(hex, '', 7, 8) .. '-' .. table.concat(hex, '', 9, 10)
     .. '-' .. table.concat(hex, '', 11, 16)
 end)
+reg('uuid_v4', KINDS['uuid'])
+-- 人名补充
+reg('person.username', function(rng)
+  local fn, ln = pick(rng, FIRST_EN):lower(), pick(rng, LAST_EN):lower()
+  local r = rng()
+  local sep = r < 0.4 and '_' or (r < 0.7 and '.' or '')
+  local s = fn .. sep .. ln
+  if rng() < 0.4 then s = s .. tostring(ri(rng, 1, 99)) end
+  return s
+end)
+reg('person.prefix', function(rng) return pick(rng, {'Mr.', 'Mrs.', 'Ms.', 'Dr.', 'Prof.'}) end)
+reg('person.suffix', function(rng) return pick(rng, {'Jr.', 'Sr.', 'II', 'III', 'IV'}) end)
+-- 联系方式补充
+reg('contact.phone_unformatted', function(rng)
+  return string.format('%03d%03d%04d', ri(rng, 200, 989), ri(rng, 200, 989), ri(rng, 0, 9999))
+end)
+-- 地址补充：门牌 / 邮编 / 经纬度 / 完整地址
+reg('address.street_number', function(rng) return tostring(ri(rng, 1, 9999)) end)
+reg('address.zip', function(rng) return string.format('%05d', ri(rng, 10000, 99999)) end)
+reg('address.lat', function(rng) return rf(rng, -90, 90, 6) end)
+reg('address.lon', function(rng) return rf(rng, -180, 180, 6) end)
+reg('address.full', function(rng)
+  return pick(rng, STREET_NAME) .. ' ' .. pick(rng, STREET_SUFFIX)
+    .. ', ' .. pick(rng, CITY_US) .. ', ' .. pick(rng, STATE_US) .. ' ' .. tostring(ri(rng, 10000, 99999))
+end)
+-- 网络 / 互联网
+local DOMAIN_TLD = {'com','org','net','io','co','dev','app','tech','ai','xyz','info','me'}
+reg('internet.domain', function(rng)
+  return pick(rng, WORDS) .. tostring(ri(rng, 1, 999)) .. '.' .. pick(rng, DOMAIN_TLD)
+end)
+reg('internet.url', function(rng)
+  return 'https://www.' .. pick(rng, WORDS) .. tostring(ri(rng, 1, 999)) .. '.' .. pick(rng, DOMAIN_TLD)
+end)
+reg('internet.ip', function(rng)
+  return string.format('%d.%d.%d.%d', ri(rng, 1, 254), ri(rng, 0, 255), ri(rng, 0, 255), ri(rng, 1, 254))
+end)
+-- 财务
+reg('finance.amount', function(rng) return string.format('%.2f', rf(rng, 1, 5000, 0)) end)
+reg('card.number', function(rng)
+  local out = {}
+  for i = 1, 4 do out[i] = string.format('%04d', ri(rng, 0, 9999)) end
+  return table.concat(out, ' ')
+end)
+reg('card.cvv', function(rng) return string.format('%03d', ri(rng, 0, 999)) end)
+-- 职业 / 行业 / 车辆
+local JOBS = {
+  'Software Engineer','Data Scientist','Product Manager','UX Designer','DevOps Engineer',
+  'Accountant','Marketing Manager','Sales Representative','Teacher','Nurse','Lawyer','Engineer',
+  'Chef','Writer','Analyst','Consultant','Architect','Photographer','Driver','Electrician',
+}
+local INDUSTRIES = {
+  'Technology','Healthcare','Finance','Education','Retail','Manufacturing','Energy','Media',
+  'Transportation','Real Estate','Consulting','Hospitality','Agriculture','Construction','Telecom',
+}
+local CAR_BRAND = { 'Toyota','Honda','Ford','Tesla','BMW','Mercedes-Benz','Audi','Volkswagen','Hyundai','Kia','Nissan','Subaru','Mazda','Lexus' }
+reg('company.job_title', function(rng) return pick(rng, JOBS) end)
+reg('company.industry', function(rng) return pick(rng, INDUSTRIES) end)
+reg('car.brand', function(rng) return pick(rng, CAR_BRAND) end)
+-- 中文补充
+reg('text.sentence_cn', function(rng)
+  local s = pick(rng, {'今天的数据','这个系统','新的方案','我们的产品','这次调研','数据库的性能','接口的设计'})
+  local v = pick(rng, {'表现良好','需要优化','运行稳定','提升明显','有待改进','符合预期','超预期','仍有瓶颈'})
+  return s .. v .. '。'
+end)
+-- 浮点区间
+reg('number.float_range', function(rng, lo_s, hi_s, dp)
+  return rf(rng, lo_s, hi_s, dp)
+end)
 
 -- 日期：默认区间 2001-01-01..2020-12-31（seed 稳定），可 kind 参数 'date.iso:lo,hi'
 -- LuaJIT 5.1 无 // 整除运算符 → 手写 floor_div（仅日期 civil 换算用）
@@ -435,6 +508,10 @@ reg('date.iso', function(rng, lo_s, hi_s) return fmt_date(rand_epoch_day(rng, lo
 reg('date.datetime', function(rng, lo_s, hi_s) return fmt_date(rand_epoch_day(rng, lo_s, hi_s)) .. ' ' .. fmt_hms(rng) end)
 reg('date.day', function(rng) return tostring(ri(rng, 1, 31)) end)
 reg('time.hm', fmt_hm)
+reg('time.date_cn', function(rng, lo_s, hi_s)
+  local y, m, d = e2d(rand_epoch_day(rng, lo_s, hi_s))
+  return string.format('%d年%d月%d日', y, m, d)
+end)
 
 -- kind 解析：'name' 或 'name:arg1,arg2'
 local function resolve_kind(rng, kind_str)
@@ -448,7 +525,12 @@ local function resolve_kind(rng, kind_str)
       local lo, hi = a1:match('^(-?%d+),(-?%d+)$')
       if not lo then return nil, name .. ':lo,hi parse failed: ' .. a1 end
       return tostring(ri(rng, tonumber(lo), tonumber(hi))), nil
-    elseif name == 'date.iso' or name == 'date.datetime' then
+    elseif name == 'number.float_range' then
+      local lo, hi, dp = a1:match('^(-?[%d%.]+),(-?[%d%.]+),(%d+)$')
+      if not lo then lo, hi = a1:match('^(-?[%d%.]+),(-?[%d%.]+)$') end
+      if not lo then return nil, name .. ':lo,hi[,dp] parse failed: ' .. a1 end
+      return fn(rng, tonumber(lo), tonumber(hi), dp and tonumber(dp) or 3), nil
+    elseif name == 'date.iso' or name == 'date.datetime' or name == 'time.date_cn' then
       local lo_s, hi_s = a1:match('^(.-),(.+)$')
       return fn(rng, lo_s, hi_s), nil
     else
@@ -478,9 +560,101 @@ local function jsesc(s)
 end
 
 -- ======================================================================
+-- 列名 → kind 自动推断（"列名自动判断调用"）
+-- 规则：先查精确名表（覆盖最常见列名），再做后缀/包含模糊匹配，兜底
+-- text.word。命中精确表 → 确定性；模糊匹配按序优先（更具体在前）。
+-- ======================================================================
+local EXACT_KIND = {
+  id = 'uuid', name = 'person.full', full_name = 'person.full', full_name_cn = 'person.full_cn',
+  first_name = 'person.first', last_name = 'person.last', name_cn = 'person.first_cn',
+  user_name = 'person.username', username = 'person.username',
+  gender = 'person.gender',
+  email = 'contact.email', email_address = 'contact.email',
+  phone = 'contact.phone', phone_number = 'contact.phone', mobile = 'contact.phone',
+  tel = 'contact.phone_unformatted',
+  company = 'company.name', company_name = 'company.name', employer = 'company.name',
+  job = 'company.job_title', job_title = 'company.job_title', title = 'company.job_title',
+  industry = 'company.industry',
+  street = 'address.street', address = 'address.full', addr = 'address.full',
+  full_address = 'address.full',
+  city = 'address.city_us', city_cn = 'address.city_cn',
+  state = 'address.state', region = 'address.state', province = 'address.city_cn',
+  country = 'address.country',
+  zip = 'address.zip', zip_code = 'address.zip', postal = 'address.zip', postal_code = 'address.zip',
+  lat = 'address.lat', latitude = 'address.lat',
+  lon = 'address.lon', lng = 'address.lon', longitude = 'address.lon',
+  street_number = 'address.street_number',
+  domain = 'internet.domain', website = 'internet.url', url = 'internet.url',
+  web_site = 'internet.url', ip = 'internet.ip', ip_address = 'internet.ip',
+  amount = 'finance.amount', price = 'finance.amount', salary = 'finance.amount',
+  revenue = 'finance.amount', cost = 'finance.amount', fee = 'finance.amount',
+  total = 'finance.amount',
+  card = 'card.number', card_number = 'card.number', credit_card = 'card.number',
+  cvv = 'card.cvv',
+  car = 'car.brand', car_brand = 'car.brand',
+  color = 'color.name', hex_color = 'color.hex', color_hex = 'color.hex',
+  word = 'text.word', words = 'text.words', sentence = 'text.sentence',
+  sentence_cn = 'text.sentence_cn', text = 'text.sentence', paragraph = 'text.sentence',
+  slug = 'text.slug',
+  note = 'text.sentence', comment = 'text.sentence', description = 'text.sentence',
+  bio = 'text.sentence',
+  is_active = 'bool.b', active = 'bool.b', is_deleted = 'bool.b', deleted = 'bool.b',
+  flag = 'bool.b', is_admin = 'bool.b', admin = 'bool.b', verified = 'bool.b',
+  date = 'date.iso', created_at = 'date.datetime', updated_at = 'date.datetime',
+  created = 'date.datetime', updated = 'date.datetime',
+  birth_date = 'date.iso', birthday = 'date.iso', dob = 'date.iso',
+  date_cn = 'time.date_cn',
+  time = 'time.hm',
+  uuid = 'uuid',
+}
+-- 模糊规则：(子串, kind)，按序匹配（先精确后模糊，命中即停）
+local FUZZY_RULES = {
+  {'_at$', 'date.datetime'},
+  {'email', 'contact.email'},
+  {'phone', 'contact.phone'},
+  {'name', 'person.full'},
+  {'user', 'person.username'},
+  {'lat', 'address.lat'},
+  {'lon', 'address.lon'},
+  {'zip', 'address.zip'},
+  {'city', 'address.city_us'},
+  {'country', 'address.country'},
+  {'street', 'address.street'},
+  {'address', 'address.full'},
+  {'company', 'company.name'},
+  {'job', 'company.job_title'},
+  {'domain', 'internet.domain'},
+  {'url', 'internet.url'},
+  {'ip', 'internet.ip'},
+  {'amount', 'finance.amount'},
+  {'price', 'finance.amount'},
+  {'card', 'card.number'},
+  {'car', 'car.brand'},
+  {'color', 'color.name'},
+  {'bool', 'bool.b'},
+  {'date', 'date.iso'},
+  {'uuid', 'uuid'},
+  {'word', 'text.word'},
+  {'text', 'text.sentence'},
+}
+local function guess_kind(colname)
+  local low = (colname or ''):lower():gsub('%s+', '_'):gsub('^_+|_+$', '')
+  if low == '' then return 'text.word' end
+  local exact = EXACT_KIND[low]
+  if exact then return exact end
+  for _, rule in ipairs(FUZZY_RULES) do
+    local pat, kind = rule[1], rule[2]
+    if low:find(pat) or (pat:sub(1, 1) == '_' and low:match(pat)) then return kind end
+  end
+  return 'text.word'  -- 兜底
+end
+
+-- ======================================================================
 -- 行级生成（op='rows' / op='table' / 表函数共用）
 -- spec = { cols={name=kind_str,...}, rows=N, seed=S, format='pipe'|'json',
 --          date_lo=?, date_hi=? }
+-- cols 值既可以是显式 kind（'person.first' / 'int:18,65'），也可以是列名本身
+-- （此时自动推断：'name' → person.full）；显式 kind 优先，列名仅做推断兜底。
 -- 返回 { rows = {每行字符串}, error = '...' }
 -- ======================================================================
 local function build_rows(spec)
@@ -500,11 +674,22 @@ local function build_rows(spec)
   end
   local fmt = spec.format == 'json' and 'json' or 'pipe'
   local rng = make_rng(spec.seed)
+  -- 预解析每列的有效 kind：显式 kind 优先；值为空 / 等于列名 → 按列名推断
+  local kind_of = {}
+  for _, k in ipairs(names) do
+    local raw = cols[k]
+    local s = raw and tostring(raw) or ''
+    if s == '' or s:lower() == k:lower() then
+      kind_of[k] = guess_kind(k)
+    else
+      kind_of[k] = s
+    end
+  end
   local rows = {}
   for r = 1, n do
     local cells = {}
     for _, k in ipairs(names) do
-      local v, e = resolve_kind(rng, tostring(cols[k]))
+      local v, e = resolve_kind(rng, kind_of[k])
       if not v then die(e) break end
       cells[#cells + 1] = { k = k, v = v }
     end

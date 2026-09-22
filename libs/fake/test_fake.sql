@@ -7,10 +7,10 @@ LOAD '/mnt/d/wsl2/luajit/build/release/luajit.duckdb_extension';
 SELECT * FROM luajit_module(mode := 'quick_compile', sql_name := 'fake',
   source := 'return dofile(''/mnt/d/wsl2/duckdb-luajit-libs/libs/fake/fake.lua'')');
 
--- 0. kinds 列表：52 个占位符（含新增 internet/finance/card/cn 等）
+-- 0. kinds 列表：55 个占位符（含新增 internet/finance/card/cn/entity 等）
 SELECT json_extract(luajit_s('fake', {op: 'kinds'}), '$.count') AS n_kinds
 FROM (SELECT 1);
--- 52
+-- 55
 
 -- 1. gen 各 kind 格式正则（一次采样，seed 固定；regexp_matches 精确断言）
 SELECT
@@ -147,9 +147,25 @@ SELECT
   regexp_matches(luajit_s('fake', {op:'gen', kind:'internet.ip', seed:2}), '^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$') AS ip_ok,
   regexp_matches(luajit_s('fake', {op:'gen', kind:'internet.url', seed:2}), '^https://www\..+\.(com|org|net|io|co|dev|app|tech|ai|xyz|info|me)$') AS url_ok,
   regexp_matches(luajit_s('fake', {op:'gen', kind:'card.number', seed:2}), '^\d{4} \d{4} \d{4} \d{4}$') AS card_ok,
-  regexp_matches(luajit_s('fake', {op:'gen', kind:'finance.amount', seed:2}), '^\d+\.\d{2}$') AS amt_ok,
+  regexp_matches(luajit_s('fake', {op:'gen', kind:'finance.amount', seed:2}), '^[0-9]+[.][0-9][0-9]$') AS amt_ok,
   regexp_matches(luajit_s('fake', {op:'gen', kind:'number.float_range:10.5,99.9,2', seed:2}), '^\d+\.\d{2}$') AS fr_ok,
   luajit_s('fake', {op:'gen', kind:'time.date_cn', seed:2}) LIKE '%年%月%日' AS dcn_ok,
   (SELECT cast(luajit_s('fake', {op:'gen', kind:'number.float_range:0.1,0.9,3', seed:9}) AS double) BETWEEN 0.1 AND 0.9) AS fr_range_ok
 FROM (SELECT 1);
 -- 全 true
+
+-- 18. 实体关联（默认开启）：同一行内 邮箱名=人名 / age↔dob 年份吻合
+--     seed 固定一行，逐列断言自洽
+SELECT
+  -- 邮箱本地部分含人名（first 或 last 的小写）
+  (json_extract_string(val,'$.email') LIKE '%' || lower(split(json_extract_string(val,'$.name'),' ')[1]) || '%')
+   OR (json_extract_string(val,'$.email') LIKE '%' || lower(split(json_extract_string(val,'$.name'),' ')[2]) || '%') AS email_has_name,
+  -- age 在 18..65
+  cast(json_extract_string(val,'$.age') AS int) BETWEEN 18 AND 65 AS age_ok,
+  -- dob 年份 ≈ 2026 - age（±1 容差）
+  (cast(substr(json_extract_string(val,'$.dob'),1,4) AS int)
+     BETWEEN 2026 - cast(json_extract_string(val,'$.age') AS int) - 1
+         AND 2026 - cast(json_extract_string(val,'$.age') AS int) + 1) AS age_dob_ok
+FROM luajit_table('fake',
+  list := '{"cols":{"name":"person.full","email":"","age":"person.age","dob":"person.dob"},"rows":1,"seed":11,"format":"json"}');
+-- 三列全 true（实体关联自洽）

@@ -1,7 +1,7 @@
 -- @lib: fake
 -- @category: fake
 -- @desc: fakeit 风格假数据生成器（纯 Lua，自包含，零 FFI/零外部依赖）——标量占位符 +
---       模板 + 行级批量，seed 可复现。52 种 kind（person/contact/company/address/
+--       模板 + 行级批量，seed 可复现。55 种 kind（person/contact/company/address/
 --       internet/finance/card/car/text(EN+CN)/date/time/number/color/bool/uuid）。
 --       双形态：
 --         1) 标量 luajit_s：gen/template/rows/kinds
@@ -11,6 +11,9 @@
 --       列名自动判断调用：cols 值留空（或等于列名）→ 按列名推断 kind
 --         （name→person.full, email→contact.email, lat→address.lat,
 --          created_at→date.datetime, zip→address.zip …）；显式 kind 始终优先。
+--       实体关联（默认开启）：每行共享一个"人"上下文——姓名/邮箱/电话/
+--         城市/州/邮编/年龄/生日 从同一实体派生（邮箱名=人名、city→state/zip、
+--         age↔dob 吻合）；金额/工资走对数正态右长尾。spec.entity=false 可关闭。
 --
 -- 用法（duckdb-luajit）：
 --   install:  SELECT * FROM luajit_module(mode:='install', sql_name:='fake');
@@ -39,7 +42,7 @@
 --                 format: 'pipe'（默认）/ 'json'
 --   lo, hi    : op='gen' 且 kind='int:lo,hi' 之外的便捷数值参数（未用，kind 参数串优先）
 --
--- kind 列表（52 个，与 go-fakeit / Rust fakeit 命名对齐子集）：
+-- kind 列表（55 个，与 go-fakeit / Rust fakeit 命名对齐子集）：
 --   person.first   英文名（first）    person.last    英文姓（last）
 --   person.full    名+姓              person.first_cn 中文名（姓+名）
 --   person.gender  male/female
@@ -61,6 +64,8 @@
 --   text.slug      kebab-case 2..3 词
 --   color.name     颜色名             color.hex      #RRGGBB
 --   uuid           UUID v4
+--   实体关联: person.age + person.dob 年龄↔生日吻合（同一行共享出生年份）
+--   finance.amount / finance.salary 对数正态右长尾（金额/工资）
 --
 -- 诚实边界：词表内置 ~700 词（英文 first/last 各 32、中文姓 30/名 16、城市 28、
 -- 国家 34、行业词 24、颜色 16、州 32、街后缀 16）——分布是均匀词表抽样，不是真实人口
@@ -221,7 +226,17 @@ local function shuffle(rng, list)
   end
   return out
 end
-
+-- 高斯（Box-Muller，基于 [0,1) rng）→ 均值 mu 方差 sigma 的正态样本
+local function gauss(rng, mu, sigma)
+  local u1 = math.max(rng(), 1e-12)
+  local u2 = rng()
+  local z = math.sqrt(-2 * math.log(u1)) * math.cos(2 * math.pi * u2)
+  return mu + z * sigma
+end
+-- 对数正态：右长尾（金额/价格/工资类）→ 字符串，dp 位小数
+local function lognormal(rng, mu, sigma, dp)
+  return string.format('%.' .. (dp or 2) .. 'f', math.exp(gauss(rng, mu, sigma)))
+end
 -- ======================================================================
 -- 词表（内置，均匀分布；~700 词）
 -- ======================================================================
@@ -263,6 +278,37 @@ local STATE_US = {
   'Florida','Georgia','Hawaii','Idaho','Illinois','Indiana','Iowa','Kansas','Kentucky','Louisiana',
   'Maine','Maryland','Massachusetts','Michigan','Minnesota','Mississippi','Missouri','Montana',
   'Nebraska','Nevada','New Hampshire','New Jersey','New Mexico','New York',
+}
+-- 城市 → 州 + 邮编前缀（关联层：city 定了，state/zip 跟着走，不再各自独立抽）
+local CITY_INFO = {
+  ['New York']    = { st = 'New York',        zip = '10' },
+  ['Los Angeles'] = { st = 'California',      zip = '90' },
+  ['Chicago']     = { st = 'Illinois',        zip = '60' },
+  ['Houston']     = { st = 'Texas',           zip = '77' },
+  ['Phoenix']     = { st = 'Arizona',         zip = '85' },
+  ['Philadelphia']= { st = 'Pennsylvania',    zip = '19' },
+  ['San Antonio'] = { st = 'Texas',           zip = '78' },
+  ['San Diego']   = { st = 'California',      zip = '92' },
+  ['Dallas']      = { st = 'Texas',           zip = '75' },
+  ['San Jose']    = { st = 'California',      zip = '95' },
+  ['Austin']      = { st = 'Texas',           zip = '78' },
+  ['Jacksonville']= { st = 'Florida',         zip = '32' },
+  ['Fort Worth']  = { st = 'Texas',           zip = '76' },
+  ['Columbus']    = { st = 'Ohio',            zip = '43' },
+  ['Charlotte']   = { st = 'North Carolina',  zip = '28' },
+  ['Indianapolis']= { st = 'Indiana',         zip = '46' },
+  ['San Francisco'] = { st = 'California',    zip = '94' },
+  ['Seattle']     = { st = 'Washington',      zip = '98' },
+  ['Denver']      = { st = 'Colorado',        zip = '80' },
+  ['Boston']      = { st = 'Massachusetts',   zip = '02' },
+  ['Nashville']   = { st = 'Tennessee',       zip = '37' },
+  ['Detroit']     = { st = 'Michigan',        zip = '48' },
+  ['Portland']    = { st = 'Oregon',          zip = '97' },
+  ['Las Vegas']   = { st = 'Nevada',          zip = '89' },
+  ['Memphis']     = { st = 'Tennessee',       zip = '38' },
+  ['Louisville']  = { st = 'Kentucky',        zip = '40' },
+  ['Baltimore']   = { st = 'Maryland',        zip = '21' },
+  ['Milwaukee']   = { st = 'Wisconsin',       zip = '53' },
 }
 local COUNTRY = {
   'United States','China','Japan','Germany','United Kingdom','France','Canada','Australia',
@@ -311,12 +357,60 @@ local function reg(name, fn)
   ALL_KINDS[#ALL_KINDS + 1] = name
 end
 
-reg('person.first', function(rng) return pick(rng, FIRST_EN) end)
-reg('person.last', function(rng) return pick(rng, LAST_EN) end)
-reg('person.full', function(rng) return pick(rng, FIRST_EN) .. ' ' .. pick(rng, LAST_EN) end)
+-- ======================================================================
+-- 行级实体上下文（关联层）：同一行的"一个人"共享 ctx，姓名/邮箱/地址
+-- 从同一实体派生 → 邮箱名=人名、city 定了 state/zip 跟着走、age↔dob 吻合。
+-- 无 ctx（标量单值调用）时各 kind 独立随机，行为与旧版一致。
+-- ======================================================================
+local function new_person_ctx(rng)
+  local ctx = {}
+  function ctx.first() if not ctx._f then ctx._f = pick(rng, FIRST_EN) end return ctx._f end
+  function ctx.last() if not ctx._l then ctx._l = pick(rng, LAST_EN) end return ctx._l end
+  function ctx.full() return ctx.first() .. ' ' .. ctx.last() end
+  function ctx.gender() if not ctx._g then ctx._g = rng() < 0.5 and 'male' or 'female' end return ctx._g end
+  local EMAIL_DOMAINS = {'example.com','example.org','example.net','test.com','mail.example.com'}
+  function ctx.email()
+    if not ctx._e then
+      local fn, ln = ctx.first():lower(), ctx.last():lower()
+      local local_part
+      local r = rng()
+      if r < 0.34 then local_part = fn .. '.' .. ln
+      elseif r < 0.67 then local_part = fn .. tostring(ri(rng, 1, 99))
+      else local_part = fn .. '.' .. ln .. tostring(ri(rng, 1, 999)) end
+      ctx._e = local_part .. '@' .. pick(rng, EMAIL_DOMAINS)
+    end
+    return ctx._e
+  end
+  function ctx.phone()
+    if not ctx._p then ctx._p = string.format('(%03d) %03d-%04d', ri(rng, 200, 989), ri(rng, 200, 989), ri(rng, 0, 9999)) end
+    return ctx._p
+  end
+  function ctx.city()
+    if not ctx._c then ctx._c = pick(rng, CITY_US) end
+    return ctx._c
+  end
+  function ctx.state()
+    if not ctx._s then ctx._s = (CITY_INFO[ctx.city()] or {}).st or pick(rng, STATE_US) end
+    return ctx._s
+  end
+  function ctx.zip()
+    if not ctx._z then
+      local p = (CITY_INFO[ctx.city()] or {}).zip
+      if p then ctx._z = p .. string.format('%03d', ri(rng, 0, 999))
+      else ctx._z = string.format('%05d', ri(rng, 10000, 99999)) end
+    end
+    return ctx._z
+  end
+  return ctx
+end
+
+reg('person.first', function(rng, ctx) if ctx then return ctx.first() end return pick(rng, FIRST_EN) end)
+reg('person.last', function(rng, ctx) if ctx then return ctx.last() end return pick(rng, LAST_EN) end)
+reg('person.full', function(rng, ctx) if ctx then return ctx.full() end return pick(rng, FIRST_EN) .. ' ' .. pick(rng, LAST_EN) end)
 reg('person.first_cn', function(rng) return pick(rng, LAST_CN) .. pick(rng, GIVEN_CN) end)
-reg('person.gender', function(rng) return rng() < 0.5 and 'male' or 'female' end)
-reg('contact.email', function(rng)
+reg('person.gender', function(rng, ctx) if ctx then return ctx.gender() end return rng() < 0.5 and 'male' or 'female' end)
+reg('contact.email', function(rng, ctx)
+  if ctx then return ctx.email() end
   local fn, ln = pick(rng, FIRST_EN):lower(), pick(rng, LAST_EN):lower()
   local local_part
   local r = rng()
@@ -326,7 +420,8 @@ reg('contact.email', function(rng)
   local domain = pick(rng, {'example.com','example.org','example.net','test.com','mail.example.com'})
   return local_part .. '@' .. domain
 end)
-reg('contact.phone', function(rng)
+reg('contact.phone', function(rng, ctx)
+  if ctx then return ctx.phone() end
   return string.format('(%03d) %03d-%04d', ri(rng, 200, 989), ri(rng, 200, 989), ri(rng, 0, 9999))
 end)
 reg('company.name', function(rng)
@@ -337,9 +432,9 @@ end)
 reg('address.street', function(rng)
   return string.format('%d %s %s', ri(rng, 1, 9999), pick(rng, STREET_NAME), pick(rng, STREET_SUFFIX))
 end)
-reg('address.city_us', function(rng) return pick(rng, CITY_US) end)
+reg('address.city_us', function(rng, ctx) if ctx then return ctx.city() end return pick(rng, CITY_US) end)
 reg('address.city_cn', function(rng) return pick(rng, CITY_CN) end)
-reg('address.state', function(rng) return pick(rng, STATE_US) end)
+reg('address.state', function(rng, ctx) if ctx then return ctx.state() end return pick(rng, STATE_US) end)
 reg('address.country', function(rng)
   local i = ri(rng, 1, #COUNTRY)
   return COUNTRY[i]
@@ -409,12 +504,20 @@ reg('person.suffix', function(rng) return pick(rng, {'Jr.', 'Sr.', 'II', 'III', 
 reg('contact.phone_unformatted', function(rng)
   return string.format('%03d%03d%04d', ri(rng, 200, 989), ri(rng, 200, 989), ri(rng, 0, 9999))
 end)
--- 地址补充：门牌 / 邮编 / 经纬度 / 完整地址
+-- 地址补充：门牌 / 邮编 / 经纬度 / 完整地址（zip/full 走实体关联：跟 city 走）
 reg('address.street_number', function(rng) return tostring(ri(rng, 1, 9999)) end)
-reg('address.zip', function(rng) return string.format('%05d', ri(rng, 10000, 99999)) end)
+reg('address.zip', function(rng, ctx)
+  if ctx then return ctx.zip() end
+  return string.format('%05d', ri(rng, 10000, 99999))
+end)
 reg('address.lat', function(rng) return rf(rng, -90, 90, 6) end)
 reg('address.lon', function(rng) return rf(rng, -180, 180, 6) end)
-reg('address.full', function(rng)
+reg('address.full', function(rng, ctx)
+  if ctx then
+    return string.format('%d %s %s, %s, %s %s',
+      ri(rng, 1, 9999), pick(rng, STREET_NAME), pick(rng, STREET_SUFFIX),
+      ctx.city(), ctx.state(), ctx.zip())
+  end
   return pick(rng, STREET_NAME) .. ' ' .. pick(rng, STREET_SUFFIX)
     .. ', ' .. pick(rng, CITY_US) .. ', ' .. pick(rng, STATE_US) .. ' ' .. tostring(ri(rng, 10000, 99999))
 end)
@@ -429,8 +532,10 @@ end)
 reg('internet.ip', function(rng)
   return string.format('%d.%d.%d.%d', ri(rng, 1, 254), ri(rng, 0, 255), ri(rng, 0, 255), ri(rng, 1, 254))
 end)
--- 财务
-reg('finance.amount', function(rng) return string.format('%.2f', rf(rng, 1, 5000, 0)) end)
+-- 财务（对数正态：右长尾——一串订单里冒出几个大额，才真实）
+-- amount 默认量级：median≈35 (e^3.55)，P99≈5k；salary 量级：median≈55k (e^10.9)
+reg('finance.amount', function(rng) return lognormal(rng, 3.55, 1.6, 2) end)
+reg('finance.salary', function(rng) return lognormal(rng, 10.9, 0.55, 0) end)
 reg('card.number', function(rng)
   local out = {}
   for i = 1, 4 do out[i] = string.format('%04d', ri(rng, 0, 9999)) end
@@ -519,9 +624,28 @@ reg('time.date_cn', function(rng, lo_s, hi_s)
   local y, m, d = e2d(rand_epoch_day(rng, lo_s, hi_s))
   return string.format('%d年%d月%d日', y, m, d)
 end)
+-- 年龄 ↔ 生日吻合（ctx 缓存出生年份：同一行 age 与 dob 一致）
+local BIRTH_YEAR_LO, BIRTH_YEAR_HI = 1961, 2008  -- 对应 2026 年 18..65 岁
+reg('person.age', function(rng, ctx)
+  if ctx then
+    if not ctx._by then ctx._by = ri(rng, BIRTH_YEAR_LO, BIRTH_YEAR_HI) end
+    return tostring(2026 - ctx._by)
+  end
+  return tostring(ri(rng, 18, 65))
+end)
+reg('person.dob', function(rng, ctx)
+  local by
+  if ctx then
+    if not ctx._by then ctx._by = ri(rng, BIRTH_YEAR_LO, BIRTH_YEAR_HI) end
+    by = ctx._by
+  else
+    by = ri(rng, BIRTH_YEAR_LO, BIRTH_YEAR_HI)
+  end
+  return fmt_date(d2e(by, ri(rng, 1, 12), ri(rng, 1, 28)))
+end)
 
--- kind 解析：'name' 或 'name:arg1,arg2'
-local function resolve_kind(rng, kind_str)
+-- kind 解析：'name' 或 'name:arg1,arg2'；ctx=行级实体上下文（可选）
+local function resolve_kind(rng, kind_str, ctx)
   local name, a1 = kind_str:match('^([%w_%.]+):?(.*)$')
   if not name then return nil, 'unknown kind: ' .. tostring(kind_str) end
   local fn = KINDS[name]
@@ -544,7 +668,7 @@ local function resolve_kind(rng, kind_str)
       return nil, 'kind ' .. name .. ' does not accept args'
     end
   end
-  return fn(rng), nil
+  return fn(rng, ctx), nil
 end
 
 -- 模板展开：{a.b} 占位符 + #? 随机 hex（gofakeit generator 风格）
@@ -593,7 +717,7 @@ local EXACT_KIND = {
   street_number = 'address.street_number',
   domain = 'internet.domain', website = 'internet.url', url = 'internet.url',
   web_site = 'internet.url', ip = 'internet.ip', ip_address = 'internet.ip',
-  amount = 'finance.amount', price = 'finance.amount', salary = 'finance.amount',
+  amount = 'finance.amount', price = 'finance.amount', salary = 'finance.salary',
   revenue = 'finance.amount', cost = 'finance.amount', fee = 'finance.amount',
   total = 'finance.amount',
   card = 'card.number', card_number = 'card.number', credit_card = 'card.number',
@@ -609,7 +733,7 @@ local EXACT_KIND = {
   flag = 'bool.b', is_admin = 'bool.b', admin = 'bool.b', verified = 'bool.b',
   date = 'date.iso', created_at = 'date.datetime', updated_at = 'date.datetime',
   created = 'date.datetime', updated = 'date.datetime',
-  birth_date = 'date.iso', birthday = 'date.iso', dob = 'date.iso',
+  birth_date = 'person.dob', birthday = 'person.dob', dob = 'person.dob', age = 'person.age',
   date_cn = 'time.date_cn',
   time = 'time.hm',
   uuid = 'uuid',
@@ -694,9 +818,13 @@ local function build_rows(spec)
   end
   local rows = {}
   for r = 1, n do
+    -- 每行一个实体上下文：姓名/邮箱/电话/城市/州/邮编/年龄/生日 从同一实体派生，
+    -- 保证跨列关联（邮箱名=人名、city→state/zip、age↔dob 吻合）。
+    -- spec.entity=false 可关闭（回到逐列独立随机，旧行为）。
+    local ctx = (spec.entity == false) and nil or new_person_ctx(rng)
     local cells = {}
     for _, k in ipairs(names) do
-      local v, e = resolve_kind(rng, kind_of[k])
+      local v, e = resolve_kind(rng, kind_of[k], ctx)
       if not v then die(e) break end
       cells[#cells + 1] = { k = k, v = v }
     end

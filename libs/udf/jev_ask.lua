@@ -12,6 +12,12 @@
 --
 -- ── 用法（duckdb-luajit） ───────────────────────────────────────────────
 --   install:  SELECT * FROM luajit_module(mode := 'install', sql_name := 'jev_ask');
+--   ⚠️ install 用户注意：展开宏是 **SQL catalog 对象**，装不进 INDEX（INDEX 只收能编译成
+--      Lua chunk 的 .lua）。装完按需 `.read libs/udf/jev_ask_macros.sql`，或粘这段最小集：
+--        CREATE OR REPLACE MACRO jev_choice(raw, qid) AS json_extract_string(raw, '$.answers.' || qid || '.choice');
+--        CREATE OR REPLACE MACRO jev_p(raw, qid, label) AS CAST(json_extract(raw, '$.answers.' || qid || '.probabilities.' || label) AS DOUBLE);
+--        CREATE OR REPLACE MACRO jev_conf(raw, qid) AS CAST(json_extract(raw, '$.answers.' || qid || '.confidence') AS DOUBLE);
+--        CREATE OR REPLACE MACRO jev_ok(raw) AS (raw IS NOT NULL AND raw NOT LIKE 'error:%');
 --   quick_compile:
 --     SELECT * FROM luajit_module(mode := 'quick_compile', sql_name := 'jev_ask',
 --       source := (SELECT content FROM read_text('/path/to/jev_ask.lua')));

@@ -4,8 +4,10 @@
 --        返回每个问题的**概率分布**（不是一句回答）。读模型在 `Answer:` 之后那一个 token 的
 --        top-k 分布：一次前向、零 token 输出、答案结构上不可能落在声明的选项集之外。
 -- @source: original（duckdb-luajit 系列）
--- @requires: curl CLI（io.popen 调系统 curl）+ 一个跑着的 jev 型决策服务（HTTP 契约 POST /v1/systemone）
--- ⚠️ 需普通模式（非 trusted）：io.popen 用于发起 HTTP 请求（与 llm_extract 同档）
+-- @requires: 一个跑着的 jev 型决策服务（HTTP 契约 POST /v1/systemone）。
+--            传输层**自动选择**：同会话已装 curl_ffi（FFI dlopen libcurl，零 fork）→ 优先用它；
+--            未装则回退 curl CLI（io.popen）。大批量 per-row 调用建议装 curl_ffi（≈10x，见 curl_ffi.lua）。
+-- ⚠️ 需普通模式（非 trusted）：io.popen / ffi.load 发起 HTTP 请求（与 llm_extract 同档）
 --
 -- 与 llm_extract 的分工：那个是**生成式**（LLM 吐 content，要 parse、不确定靠猜）；
 -- 这个是**读数式**（读分布，可直接当列用：WHERE 阈值门控 / GROUP BY 分档 / 当特征 / 进台账）。
@@ -109,6 +111,27 @@ local function endpoint_of(p)
   return (e:gsub('/+$', ''))
 end
 
+-- ── 传输层选择（2026-09-22 升级）────────────────────────────────────────
+-- 优先走 curl_ffi（FFI dlopen libcurl，零 fork、零临时文件）：当同会话已加载
+-- curl_ffi（init.lua batch-register 会设 _G._curl_ffi_post）时启用。
+-- 不存在则回退 curl CLI（io.popen）——保证 curl_ffi 未安装时 jev_ask 独立可用。
+-- PoC 实测（WSL, jev-clone /healthz 微基准）：FFI 0.33ms/call vs CLI 3.34ms/call ≈ 10x，
+-- 且同一 POST body 两种 transport 响应逐字节一致（见 libs/udf/PoC-curl_ffi-output.txt）。
+local function post(url, body, timeout)
+  local ffi_post = _G._curl_ffi_post
+  if ffi_post then
+    local res, e = ffi_post({ url = url, body = body,
+                               headers = { ['Content-Type'] = 'application/json' },
+                               timeout = timeout })
+    if res then return res end
+    -- curl_ffi 返回 'error: <msg>'，剥掉前缀回传裸消息，由调用方 err() 统一加前缀
+    -- （与 CLI 路径 http_post 返回裸错误串的约定一致）
+    return nil, tostring(e or 'curl_ffi transport failed'):sub(8)
+  end
+  -- 回退：curl CLI
+  return http_post(url, body, timeout)
+end
+
 local function health(p)
   local url = endpoint_of(p) .. '/healthz'
   local pipe = io.popen(string.format("curl -s --noproxy '*' --max-time 10 '%s'", url))
@@ -136,7 +159,7 @@ local function ask(p)
     .. ',"model":"' .. json_escape(p.model or 'local-latest') .. '"'
     .. ',"questions":' .. p.questions .. '}'
 
-  local res, e = http_post(endpoint .. '/v1/systemone', body, p.timeout)
+  local res, e = post(endpoint .. '/v1/systemone', body, p.timeout)
   if not res then return err(e) end
 
   -- 服务端契约违例（422）与读出头失败（502）以 HTTP 码区分，客户端按码分诊而非一律重试

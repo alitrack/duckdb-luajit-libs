@@ -46,5 +46,6 @@ dbcli|libs/db/dbcli.lua
 usql|libs/db/usql.lua
 audit_chain|libs/security/audit_chain.lua
 jev_ask|libs/udf/jev_ask.lua
+curl_ffi|libs/udf/curl_ffi.lua
 fake|libs/fake/fake.lua
 classifier|libs/ml/classifier.lua

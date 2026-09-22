@@ -257,11 +257,24 @@ local LAST_CN = {
   '徐','孙','胡','朱','高','林','何','郭','马','罗',
   '梁','宋','郑','谢','韩','唐','冯','于','董','萧',
 }
-local GIVEN_CN = {
-  '伟','芳','娜','秀英','敏','静','丽','强','磊','军',
-  '洋','勇','艳','杰','娟','涛','明','超','霞','平',
-  '刚','桂英',
+-- 中文"名"（given name）分单字 / 双字两个池，按近年真实占比抽——
+-- 双字名（总 3 字名）占大头约 55%，单字名约 45%。旧版是扁平 22 词池里仅 2 个双字，
+-- 导致 91% 的名字是"姓+单字"的 2 字名，一眼假。
+local GIVEN_CN_1 = {
+  '伟','芳','娜','敏','静','丽','强','磊','军','洋',
+  '勇','艳','杰','娟','涛','明','超','霞','平','刚',
+  '斌','鹏','琳','鑫','宇','浩','博','婷','欣','凯',
 }
+local GIVEN_CN_2 = {
+  '秀英','桂英','建国','建军','志刚','海燕','淑珍','淑兰','玉兰','玉梅',
+  '丽华','凤英','美玲','雪梅','桂兰','淑芬','雅静','雅芳','志强','国栋',
+  '俊杰','晓燕','春梅','秀梅','玉华','美华','淑华','凤仙','桂香','伟民',
+}
+local CN_DOUBLE_GIVEN_PROB = 0.55  -- 双字名（→ 总 3 字名）占比
+local function cn_given(rng)
+  if rng() < CN_DOUBLE_GIVEN_PROB then return pick(rng, GIVEN_CN_2) end
+  return pick(rng, GIVEN_CN_1)
+end
 local CITY_US = {
   'New York','Los Angeles','Chicago','Houston','Phoenix','Philadelphia','San Antonio','San Diego',
   'Dallas','San Jose','Austin','Jacksonville','Fort Worth','Columbus','Charlotte','Indianapolis',
@@ -407,7 +420,7 @@ end
 reg('person.first', function(rng, ctx) if ctx then return ctx.first() end return pick(rng, FIRST_EN) end)
 reg('person.last', function(rng, ctx) if ctx then return ctx.last() end return pick(rng, LAST_EN) end)
 reg('person.full', function(rng, ctx) if ctx then return ctx.full() end return pick(rng, FIRST_EN) .. ' ' .. pick(rng, LAST_EN) end)
-reg('person.first_cn', function(rng) return pick(rng, LAST_CN) .. pick(rng, GIVEN_CN) end)
+reg('person.first_cn', function(rng) return pick(rng, LAST_CN) .. cn_given(rng) end)
 reg('person.gender', function(rng, ctx) if ctx then return ctx.gender() end return rng() < 0.5 and 'male' or 'female' end)
 reg('contact.email', function(rng, ctx)
   if ctx then return ctx.email() end
@@ -596,11 +609,14 @@ local EPOCH_DEFAULT_LO = d2e(2001, 1, 1)
 local EPOCH_DEFAULT_HI = d2e(2020, 12, 31)
 local function rand_epoch_day(rng, lo_s, hi_s)
   local lo, hi = EPOCH_DEFAULT_LO, EPOCH_DEFAULT_HI
-  if lo_s then
+  -- lo_s/hi_s 只认字符串日期界。行级/表函数调用会把实体 ctx（table）传进 lo_s 槽
+  -- （date 系签名 (rng, lo_s, hi_s) 与实体系 (rng, ctx) 在第 2 参撞位），非字符串直接忽略
+  -- → 走默认区间，否则会 table:match 抛错被表函数 pcall 吞成 0 行。
+  if type(lo_s) == 'string' then
     local y, m, d = lo_s:match('(%d%d%d%d)-(%d%d)-(%d%d)')
     if y then lo = d2e(tonumber(y), tonumber(m), tonumber(d)) end
   end
-  if hi_s then
+  if type(hi_s) == 'string' then
     local y, m, d = hi_s:match('(%d%d%d%d)-(%d%d)-(%d%d)')
     if y then hi = d2e(tonumber(y), tonumber(m), tonumber(d)) end
   end

@@ -1,13 +1,16 @@
 -- @lib: fake
 -- @category: fake
 -- @desc: fakeit 风格假数据生成器（纯 Lua，自包含，零 FFI/零外部依赖）——标量占位符 +
---       模板 + 行级批量，seed 可复现。go-fakeit 的 130+ 函数集按核心 30 种
---       kind 实现（person/contact/company/address/datetime/number/text/color/boolean/uuid）。
+--       模板 + 行级批量，seed 可复现。52 种 kind（person/contact/company/address/
+--       internet/finance/card/car/text(EN+CN)/date/time/number/color/bool/uuid）。
 --       双形态：
 --         1) 标量 luajit_s：gen/template/rows/kinds
 --         2) 表函数 luajit_table('fake', list := '<spec JSON>')：row_idx|val，
 --            val = 一行数据（pipe 分隔，\ → \x07 / | → \x07p / 换行 → \x07n；
 --            format='json' 时每行一个 JSON 对象）
+--       列名自动判断调用：cols 值留空（或等于列名）→ 按列名推断 kind
+--         （name→person.full, email→contact.email, lat→address.lat,
+--          created_at→date.datetime, zip→address.zip …）；显式 kind 始终优先。
 --
 -- 用法（duckdb-luajit）：
 --   install:  SELECT * FROM luajit_module(mode:='install', sql_name:='fake');
@@ -17,6 +20,10 @@
 --   行级:     SELECT luajit_s('fake', {op:'rows', spec:{cols:{name:'person.full'}, rows:3}});
 --   表函数:   SELECT * FROM luajit_table('fake',
 --             list := '{"cols":{"name":"person.full","email":"contact.email","age":"int:18,65"},
+--                       "rows":5,"seed":42}');
+--   列名自动推断: cols 值留空 → 按列名猜 kind（无需手写 kind 串）：
+--             SELECT * FROM luajit_table('fake',
+--             list := '{"cols":{"name":"","email":"","phone":"","lat":"","zip":""},
 --                       "rows":5,"seed":42}');
 --
 -- 参数（表形式；JSON 字符串也可）：
@@ -32,7 +39,7 @@
 --                 format: 'pipe'（默认）/ 'json'
 --   lo, hi    : op='gen' 且 kind='int:lo,hi' 之外的便捷数值参数（未用，kind 参数串优先）
 --
--- kind 列表（30 个，与 go-fakeit 命名对齐子集）：
+-- kind 列表（52 个，与 go-fakeit / Rust fakeit 命名对齐子集）：
 --   person.first   英文名（first）    person.last    英文姓（last）
 --   person.full    名+姓              person.first_cn 中文名（姓+名）
 --   person.gender  male/female

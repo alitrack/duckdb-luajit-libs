@@ -68,3 +68,26 @@ CREATE OR REPLACE MACRO jev_prob_sum(raw, qid) AS (
   SELECT sum(CAST(p.value AS DOUBLE))
   FROM json_each(json_extract(raw, '$.answers.' || qid || '.probabilities')) AS p
 );
+
+-- ── per-row 一行分类（MotherDuck prompt_jev 风格的本地等价形态）─────────────
+-- 为什么要拆两层（DuckDB 硬约束：scalar macro 的 body 里不能出现 table 子查询——
+-- `struct_pack(...) FROM (...)` 会被当表展开、绑定错位）：
+--   * jev_questions(instructions, choice) 是**表宏**——UNNEST + json_group_object
+--     那个必须聚合的脏活只能放表宏里；
+--   * jev(text, questions) 是**纯标量宏**——body 就是一句 luajit_s(...) 直接展开，
+--     因此可以在 SELECT 列表里对每行调用（per-row 串行，服务端一次前向/行）。
+-- 用法：questions 是常量，先组装一次存进变量，再扫表：
+--   SET VARIABLE q = (SELECT questions FROM jev_questions(
+--     'Classify the topic of this news article.', ['World','Sports','Business','Sci/Tech']));
+--   SELECT id, jev_choice(r,'q') AS topic, round(jev_conf(r,'q'),3) AS conf
+--   FROM (SELECT id, jev(body, getvariable('q')) AS r FROM t) ORDER BY id;
+-- 多题：当前 jev_questions 固定单题（key='q'）；多题需手写 questions JSON
+--       多 key 后直接喂 jev(text, questions_json)——jev 只负责透传，题目数不限。
+CREATE OR REPLACE MACRO jev_questions(instructions, choice) AS TABLE
+SELECT
+  '{"q":{"type":"choice","instructions":' || to_json(instructions)
+  || ',"criteria":' || (SELECT to_json(json_group_object(s, s))
+                        FROM (SELECT UNNEST(choice) AS s)) || '}}' AS questions;
+
+CREATE OR REPLACE MACRO jev(text, questions) AS
+  luajit_s('jev_ask', {state: text, questions: questions});

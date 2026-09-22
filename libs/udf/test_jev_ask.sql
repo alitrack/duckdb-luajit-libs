@@ -103,3 +103,24 @@ FROM decisions;
 -- 8c. 概率守恒复核（服务端归一化、SQL 侧只核，不重算）：期望全部 conserved = true
 SELECT count(*) FILTER (WHERE abs(jev_prob_sum(raw,'team') - 1.0) > 1e-6) AS n_violating FROM decisions;
 
+-- 9. per-row 一行分类门面（jev_questions 表宏 + jev 纯标量宏，MotherDuck prompt_jev 本地等价）
+--    断言：4 条各归入其主题（确定性语料，期望全对）、0 失败、4 个 conf 在 (0,1]
+CREATE OR REPLACE TABLE facade_t AS SELECT * FROM (VALUES
+  (1, 'Wall St. Bears Claw Back Into the Black, short-sellers seeing green again'),
+  (2, 'The Reds win the cup final after extra time in a thrilling finish'),
+  (3, 'NASA launches new probe to study the outer solar system'),
+  (4, 'World leaders meet to discuss climate accord and international trade')
+) AS t(id, body);
+SET VARIABLE fq = (SELECT questions FROM jev_questions(
+  'Classify the topic of this news article.', ['World','Sports','Business','Sci/Tech']));
+CREATE OR REPLACE TABLE facade_r AS
+SELECT id, jev_choice(r,'q') AS topic, jev_conf(r,'q') AS conf, jev_ok(r) AS ok
+FROM (SELECT id, jev(body, getvariable('fq')) AS r FROM facade_t);
+SELECT count(*) AS n,
+       count(*) FILTER (WHERE NOT ok) AS n_failed,
+       count(*) FILTER (WHERE conf IS NULL OR conf <= 0 OR conf > 1) AS n_bad_conf,
+       count(*) FILTER (WHERE (id=1 AND topic='Business') OR (id=2 AND topic='Sports')
+                          OR (id=3 AND topic='Sci/Tech') OR (id=4 AND topic='World')) AS n_correct
+FROM facade_r;
+-- 期望（2026-09-22 实测）：n=4 n_failed=0 n_bad_conf=0 n_correct=4
+

@@ -78,6 +78,20 @@ local function err(msg)
   return 'error: ' .. tostring(msg)
 end
 
+-- 平台探测：Windows 的 io.popen 走 cmd.exe，**单引号是字面量**（不是 shell 引用）→
+-- URL/路径里混入 ' → curl rc=3 (malformed URL) / rc=26 (file read error)。
+-- 2026-09-22 Windows 实测：同一命令 WSL 正常、cmd.exe 全灭；双引号版（cmd 剥外层双引号）
+-- 则全过。解法：平台感知引用——Windows 用双引号、`*` 裸写；其余平台用单引号。
+local IS_WINDOWS = (os.getenv('PROCESSOR_ARCHITECTURE') ~= nil or os.getenv('COMPUTERNAME') ~= nil)
+
+-- shell 引用（cmd.exe 认双引号、POSIX 认单引号）
+local function sq(s)
+  if IS_WINDOWS then return '"' .. s .. '"' end
+  return "'" .. s .. "'"
+end
+-- --noproxy 的通配 *：POSIX 要引号防 glob，cmd.exe 裸写即可
+local NOPROXY_STAR = IS_WINDOWS and '*' or "'*'"
+
 -- ============ HTTP（curl CLI，跨平台） ============
 -- 本机/内网 HTTP 必须 --noproxy '*'：否则会走代理环境变量（WSL 上实测会把 loopback 请求带偏）。
 local function http_post(url, body, timeout)
@@ -87,9 +101,11 @@ local function http_post(url, body, timeout)
   f:write(body)
   f:close()
   local cmd = string.format(
-    "curl -s --noproxy '*' --max-time %s -X POST '%s' "
-    .. "-H 'Content-Type: application/json' --data-binary @'%s' -w '\\n%%{http_code}'",
-    tostring(timeout or 120), url, tmp)
+    "curl -s --noproxy %s --max-time %s -X POST %s "
+    .. "-H %s --data-binary %s -w %s",
+    NOPROXY_STAR, tostring(timeout or 120), sq(url),
+    sq('Content-Type: application/json'), sq('@' .. tmp),
+    sq('\\n%{http_code}'))   -- 已是 %s 参数，% 无需再 %% 转义（那是 format 串才需要的）
   local pipe = io.popen(cmd)
   if not pipe then os.remove(tmp) return nil, 'io.popen failed (needs normal mode)' end
   local out = pipe:read('*a')
@@ -134,7 +150,7 @@ end
 
 local function health(p)
   local url = endpoint_of(p) .. '/healthz'
-  local pipe = io.popen(string.format("curl -s --noproxy '*' --max-time 10 '%s'", url))
+  local pipe = io.popen(string.format("curl -s --noproxy %s --max-time 10 %s", NOPROXY_STAR, sq(url)))
   if not pipe then return err('io.popen failed (needs normal mode)') end
   local out = pipe:read('*a')
   pipe:close()

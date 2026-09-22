@@ -43,9 +43,10 @@ local ffi = require('ffi')  -- 扩展的 Lua state 无全局 ffi（iconv.lua 同
 
 local function load_lib()
   local names = {
-    'libcurl.so.4', 'libcurl.so',        -- Linux
-    'libcurl.4.dylib', 'libcurl.dylib',  -- macOS
-    'libcurl-x64.dll', 'libcurl.dll',    -- Windows
+    'libcurl.so.4', 'libcurl.so',             -- Linux (Ubuntu/Debian 实测)
+    'libcurl.4.dylib', 'libcurl.dylib',       -- macOS
+    'libcurl-x64.dll', 'libcurl.dll',         -- Windows: curl 官方 DLL / 裸名
+    'libcurl-4.dll', 'libcurl-openssl-4.dll', -- Windows: Git-for-Windows/MSYS2 命名（2026-09-22 实测主机名）
   }
   for _, n in ipairs(names) do
     local ok, llib = pcall(ffi.load, n)

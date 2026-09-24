@@ -1,6 +1,7 @@
 -- @lib: jsonpath
 -- @category: parser
 -- @desc: RFC 9535 JSONPath 实用子集（自含纯 Lua，无 FFI）—— DuckDB 内建 json_extract
+-- @license: MIT (duckdb-luajit-libs project)
 --       只支持简单成员/索引路径，不支持通配 *、递归下降 $..x、过滤谓词 [?(@.a>1)]。
 --       本库补齐，query(doc, expr) → 命中值 JSON 数组（文档顺序，保留重复）。
 --       支持子集：$ 根；.name / ['name'] 成员；* 通配；[n]/[-n] 数组索引；

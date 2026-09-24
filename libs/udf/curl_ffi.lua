@@ -5,6 +5,7 @@
 --        用途：jev_ask 的大批量 per-row 调用（CLI 版每行 fork 一次 curl 进程，FFI 版无此开销）。
 -- @source: original（duckdb-luajit 系列）
 -- @requires: 系统 libcurl 动态库（WSL Ubuntu 自带 libcurl.so.4；Windows 需 libcurl-x64.dll 或
+-- @license: MIT (duckdb-luajit-libs project)
 --            装 curl 发行版；macOS 自带 libcurl.4.dylib）。**不需要** curl.h 头文件——
 --            只 cdef 用到的最小符号集（2026-09-22 实测：无 dev 头、非特权 WSL 也能跑）。
 -- ⚠️ 需普通模式（非 trusted）：ffi.load 被 trusted 沙箱禁用（与 linalg/usql 同档）。

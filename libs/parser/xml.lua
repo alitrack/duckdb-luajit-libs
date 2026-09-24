@@ -6,6 +6,7 @@
 --       op='attr'：路径+属性名 → 属性值；op='text'：去除所有标签的纯文本。
 -- @source: original（duckdb-luajit 系列，自包含无外部依赖）
 -- @requires: none
+-- @license: MIT (duckdb-luajit-libs project)
 -- 支持子集（诚实边界）：元素/属性/文本/CDATA/注释/PI/声明/实体(&amp;等+&#NN;+&#xNN;)。
 -- 未支持：命名空间前缀（保留原样作 tag 名）、DTD 实体定义、XSD。
 --

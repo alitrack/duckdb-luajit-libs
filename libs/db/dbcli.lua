@@ -3,6 +3,7 @@
 -- @desc: 通用"本机客户端"数据库 transport——Lua 调本机 DB CLI（sqlite3/psql/mysql/redis-cli/任意），把输出转成表函数行。duckdb_universal 的长尾 transport 总线：新增数据库支持 = 本机装好 CLI + 一条 SQL，无需重编 Rust 扩展。
 -- @source: original（duckdb-luajit 系列）
 -- @requires: 本机已安装对应 CLI；io.popen 可用（默认非 trusted 模式）
+-- @license: MIT (duckdb-luajit-libs project)
 --
 -- 形态：表函数（luajit_table）。list 参数 = JSON 规格字符串：
 --   {"client":"sqlite3","args":["-json","/tmp/x.db"],"sql":"SELECT 1 AS a","kind":"json"}

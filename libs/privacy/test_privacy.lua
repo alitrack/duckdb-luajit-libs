@@ -1,4 +1,5 @@
 -- privacy.lua 锚定测试 v2（RNG 重写为 Park-Miller/Schrage 后）
+-- @license: MIT (duckdb-luajit-libs project)
 local f = dofile('privacy.lua')
 local passed, failed = 0, 0
 local function check(desc, got, expect)

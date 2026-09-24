@@ -1,4 +1,5 @@
 -- demo_tcc_inline.lua — TCC 直接嵌入 C 代码:源码内嵌为 Lua 字符串,
+-- @license: MIT (duckdb-luajit-libs project)
 -- 运行时用 libtcc 编译进内存并调用。自包含,不读磁盘 .c 文件。
 --
 -- 前置:

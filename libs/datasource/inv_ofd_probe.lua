@@ -1,4 +1,5 @@
 -- ofd_probe.lua — probe driver: runs inv_ofd.lua's exact test assertions THROUGH the
+-- @license: MIT (duckdb-luajit-libs project)
 -- real DuckDB LuaJIT extension (no standalone luajit on this box). Returns a summary
 -- string; no print/os.exit (those would kill the host duckdb process). NOT committed.
 -- Top-level return is a FUNCTION so quick_compile registers a callable; all logic

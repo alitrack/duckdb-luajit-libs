@@ -1,4 +1,5 @@
 #!/usr/bin/env luajit
+-- @license: MIT (duckdb-luajit-libs project)
 -- gen_inline.lua — 从 sudoku_solve.c 生成两个"直接嵌入 C"的 demo,
 -- 保证内嵌源码与 .c 文件单一事实来源一致,避免手抄脱同步。
 -- 用法: <luajit>/third_party/LuaJIT/src/luajit gen_inline.lua

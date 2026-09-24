@@ -12,6 +12,7 @@
 --       汉字压缩模式）。更大负载/多模式请走原生路径。
 -- @source: 布局移植自 python-qrcode(MIT) 与 Nayuki QR Code generator(Apache-2.0) 的公开算法
 -- @requires: 无（用 LuaJIT 原生位运算 & ~ | << >>；纯 Lua 5.1 需 bit 库）
+-- @license: MIT (algorithm layout) / Apache-2.0 (Nayuki QR generator)
 --
 -- Usage (duckdb-luajit, scalar mode):
 --   install:  SELECT * FROM luajit_module(mode:='install', sql_name:='qr');

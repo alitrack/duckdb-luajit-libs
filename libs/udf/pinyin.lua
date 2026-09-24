@@ -18,6 +18,7 @@
 -- @source: vendored 词典 https://github.com/mozillazg/pinyin-data → pypinyin
 --          (pypinyin 0.55.0, MIT)；转换引擎 original
 -- @requires: none（单文件自包含）
+-- @license: MIT (vendored pinyin-data dictionary, mozillazg)
 -- Usage:
 --   SELECT * FROM luajit_module(mode := 'install', sql_name := 'pinyin');
 --   SELECT luajit_s('pinyin', {v: '重庆'});             -- {"pinyin":["chóngqìng"],"joined":"chóngqìng"}

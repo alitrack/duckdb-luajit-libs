@@ -3,6 +3,7 @@
 -- @desc: MP3 ID3v2 标签解析（TIT2/TPE1/TALB/TYER/TRCK/TCON，ISO-8859-1/UTF-16/UTF-8），单文件→扁平行，目录→多行
 -- @source: original（duckdb-luajit 系列）
 -- @requires: none
+-- @license: MIT (duckdb-luajit-libs project)
 -- Usage (luajit_table, table mode): source returns function(list_str) → rows[]
 --   install: SELECT * FROM luajit_module(mode:='install', sql_name:='id3');
 --   call:    SELECT * FROM luajit_table('id3', list := '/path/a.mp3,/path/b.mp3');

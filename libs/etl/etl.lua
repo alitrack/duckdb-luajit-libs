@@ -1,4 +1,5 @@
 -- etl.lua: ETL 流程层——审计 / 幂等 / 自愈 / 组件化 / Pipeline 引擎（2026-08-19）
+-- @license: MIT (duckdb-luajit-libs project)
 -- 需要普通模式（非 trusted）：存储过程回查依赖 _duckdb_call / _duckdb_query
 --
 -- 使用（install 后）：

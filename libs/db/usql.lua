@@ -3,6 +3,7 @@
 -- @desc: in-process 数据库 transport：Lua 进程内加载 usql-bridge（Go c-shared，内嵌 xo/usql 的 database/sql 驱动），连接常驻、多次查询无进程冷启。与 dbcli+usql 二进制互补：那条路要用户机器装 usql 二进制、每查询拉进程（30-100ms 冷启）；本库零外部二进制，实测持续查询 ~0.2ms/次（PoC 口径，SQLite）。
 -- @source: alitrack/usql-bridge（Go 桥，MIT）+ 本 FFI 桥（original）
 -- @requires: luajit FFI 可用（默认非 trusted 模式）；usql-bridge 工件（按平台自动解析，见下）
+-- @license: MIT (alitrack/usql-bridge + original)
 -- 自包含：spec 用内联极简 JSON 解析（扁平 string+number 对象），不依赖 labs 的 json 库。
 --
 -- 工件按平台选名（usql-bridge release v0.1.1 起覆盖全平台）：

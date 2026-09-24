@@ -1,4 +1,5 @@
 -- llm_extract.lua 断言测试：cd libs/udf && luajit llm_extract_test.lua
+-- @license: MIT (duckdb-luajit-libs project)
 -- 离线断言 + live 验证（设 LLM_TEST_ENDPOINT 时调用真实 LLM）：
 --   LLM_TEST_ENDPOINT=http://10.10.10.115:8011 luajit llm_extract_test.lua
 local fn = assert(dofile('llm_extract.lua'))

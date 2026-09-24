@@ -129,6 +129,19 @@ SELECT * FROM luajit_module(mode := 'compile', sql_name := 'etl_demo',
 4. Library ends with `return function(...)` (luajit_module call convention)
 5. Open a PR — once merged, it is loadable via `install` / `list_remote`
 
+## Supply Chain & Licensing (SBOM)
+
+- Every library carries an `@license` header; see **[SBOM.md](SBOM.md)** for the full
+  inventory (per-file SHA-256, licenses, provenance) and `sbom.cdx.json` for a
+  CycloneDX machine-readable form. Regenerate with `python3 scripts/gen_sbom.py`.
+- Vendored third-party components: rxi/json.lua (MIT), iskolbin/lbase64 (public
+  domain), mozillazg/pinyin-data dictionaries (MIT), Nayuki QR algorithm layout
+  (Apache-2.0). All others are original MIT code.
+- System dependencies linked at runtime via FFI (OpenBLAS/LAPACK, HiGHS) are
+  **not distributed** in this repo — interface-only.
+- `install` verifies every download against INDEX.v2 SHA-256 (fail-closed,
+  including the cache path); see the extension's security docs.
+
 ## Boundaries (honest)
 
 - **Pure-Lua libs work directly**; C-dependent ones (lpeg/luasocket/lua-cjson) need an FFI bridge or a

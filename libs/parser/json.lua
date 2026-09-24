@@ -3,6 +3,7 @@
 -- @desc: JSON 解析/编码（纯 Lua）
 -- @source: vendored https://github.com/rxi/json.lua (MIT, rxi 2020)
 -- @requires: none
+-- @license: MIT (vendored rxi/json.lua, rxi 2020)
 --
 -- json.lua
 --

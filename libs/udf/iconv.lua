@@ -4,6 +4,7 @@
 --        file(文件转码→UTF-8 临时文件，供 read_csv/COPY 直接消费) / lang(语言检测 ISO 639-1)
 -- @source: original（duckdb-luajit 系列）
 -- @requires: none（FFI 调 libc 的 iconv：Linux glibc/macOS 内置；Windows 需 GNU libiconv 的
+-- @license: MIT (duckdb-luajit-libs project)
 --   libiconv-2.dll——放 PATH 或设 LUAJIT_ICONV_LIB 指向完整路径）
 -- ⚠️ 需普通模式（非 trusted）：file 场景用 io.open 读文件
 --

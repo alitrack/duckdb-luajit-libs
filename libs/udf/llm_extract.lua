@@ -5,6 +5,7 @@
 --        复杂语言识别、情感/实体抽取一把梭。本质 = 一行 SQL 内嵌 LLM 调用。
 -- @source: original（duckdb-luajit 系列）
 -- @requires: curl CLI（io.popen 调系统 curl：Windows 10+ 自带 curl.exe）
+-- @license: MIT (duckdb-luajit-libs project)
 -- ⚠️ 需普通模式（非 trusted）：io.popen / os 用于发起 HTTP 请求
 --
 -- Usage (duckdb-luajit):

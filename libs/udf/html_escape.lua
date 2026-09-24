@@ -3,6 +3,7 @@
 -- @desc: HTML 实体转义/反转义（& < > " '；数值实体不解码）
 -- @source: original（duckdb-luajit 系列）
 -- @requires: none
+-- @license: MIT (duckdb-luajit-libs project)
 -- Usage (duckdb-luajit):
 --   install: SELECT * FROM luajit_module(mode:='install', sql_name:='html_escape');
 --   escape:  SELECT luajit_s('html_escape', {v: '<a href="x">', op: 'escape'});

@@ -1,4 +1,5 @@
 -- demo_tcc_embed.lua — 无 gcc 环境复现:用 LuaJIT FFI 驱动 libtcc,
+-- @license: MIT (duckdb-luajit-libs project)
 -- 在内存里编译 sudoku_solve.c 并求解(零预编译,读源码即跑)
 --
 -- 前置:

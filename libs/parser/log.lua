@@ -6,6 +6,7 @@
 --       通用行（时间戳锚定 + [LEVEL] 标记）。ts 统一输出 ISO8601（epoch 秒/毫秒、ISO、syslog 无年份→2000）。
 -- @source: original（duckdb-luajit 系列，自包含无外部依赖）
 -- @requires: 无（普通模式需读文件；trusted 模式不可用）
+-- @license: MIT (duckdb-luajit-libs project)
 -- 诚实边界：ts 解析为启发式锚定（取行首/首个可识别时间戳）；msg 中保留原始文本，
 --   仅剔除已抽取的 ts/level 前缀；kvs 抽取 JSON 顶层字符串/数值字段。
 --

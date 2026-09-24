@@ -12,6 +12,7 @@
 --       避免字节级退化：王小明 vs 王小民 字节级 jw 会错误得 1.0，代码点级得 0.875）。
 -- @source: original（duckdb-luajit 系列，自包含无外部依赖）
 -- @requires: none
+-- @license: MIT (duckdb-luajit-libs project)
 -- 诚实边界：Jaro-Winkler 前缀长度上限 4（经典定义）；`simrank` 候选数以百计为最佳，
 -- 万级以上请改走 SQL 端 join + 本函数打分。lev 用 O(len_a × len_b) DP（短串最优）。
 --

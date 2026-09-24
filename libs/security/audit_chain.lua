@@ -4,6 +4,7 @@
 --        篡改任一历史行（改字段/改链/删行）即刻暴露。哈希用 DuckDB 内建 sha256()（零新依赖、零编译）。
 -- @source: original（duckdb-luajit 系列）
 -- @requires: _duckdb_query（普通模式，非 trusted 沙箱）+ DuckDB 内建 sha256() / lag() OVER()
+-- @license: MIT (duckdb-luajit-libs project)
 --
 -- 定位：etl_run_log 记「跑过什么」，本库解决「记录本身可被改而不留痕」——即审计的证据力。
 --       对应监管语境里的 tamper-evident audit log（例：IETF draft-klrc-aiagent-auth-03 的

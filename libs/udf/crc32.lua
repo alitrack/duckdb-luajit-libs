@@ -3,6 +3,7 @@
 -- @desc: CRC-32 校验和（IEEE 802.3，LuaJIT bit 查表法，返回 8 位十六进制大写）
 -- @source: original（duckdb-luajit 系列；标准 CRC-32 算法，查表法）
 -- @requires: LuaJIT bit 库（duckdb-luajit 环境必有）
+-- @license: MIT (duckdb-luajit-libs project)
 -- Usage (duckdb-luajit):
 --   install: SELECT * FROM luajit_module(mode:='install', sql_name:='crc32');
 --   call:    SELECT luajit_s('crc32', 'hello');   -- → 3610A686

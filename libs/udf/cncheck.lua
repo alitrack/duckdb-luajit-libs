@@ -10,6 +10,7 @@
 --       各校验 op 返回 JSON：{"valid":true|false,"reason":"..."}（配 json_extract 用）。
 -- @source: original（duckdb-luajit 系列，自包含无外部依赖）
 -- @requires: none
+-- @license: MIT (duckdb-luajit-libs project)
 -- 锚点（已验证）：身份证 11010519491231002X 有效 / 110105194912310020 无效；
 --   USCC 91350100M000100Y43 有效 / …44 无效；银行卡 4111111111111111 有效；手机 13800138000 有效。
 --

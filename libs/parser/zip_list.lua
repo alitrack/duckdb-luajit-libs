@@ -3,6 +3,7 @@
 -- @desc: ZIP 中央目录文件清单（文件名|压缩方法|压缩大小|原始大小|CRC32），无需解压
 -- @source: original（duckdb-luajit 系列）
 -- @requires: none
+-- @license: MIT (duckdb-luajit-libs project)
 -- Usage (luajit_table, table mode): source returns function(list_str) → rows[]
 --   install: SELECT * FROM luajit_module(mode:='install', sql_name:='zip_list');
 --   call:    SELECT * FROM luajit_table('zip_list', list := '/path/a.zip');

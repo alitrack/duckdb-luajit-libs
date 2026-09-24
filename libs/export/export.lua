@@ -3,6 +3,7 @@
 -- @desc: 存储过程式导出——Lua 里一条 COPY (query) TO file，参数化格式/路径；配合 CREATE MACRO 当导出过程用
 -- @source: original（duckdb-luajit 系列）
 -- @requires: none（需普通模式——_duckdb_call 回调在 trusted 沙箱下不可用）
+-- @license: MIT (duckdb-luajit-libs project)
 -- Stored-procedure style export for duckdb-luajit (LuaJIT 5.1).
 -- Runs COPY via the _duckdb_call callback on the extension's second connection.
 -- Usage:

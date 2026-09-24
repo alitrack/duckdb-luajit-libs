@@ -1,4 +1,5 @@
 -- etl.pipeline E2E 演示（2026-08-20）
+-- @license: MIT (duckdb-luajit-libs project)
 -- 用法：编译后通过 luajit_s 调用
 -- 演示 Pipeline 引擎 v2 全部能力：
 --   source / transform / quality / if_node / switch_node / sink

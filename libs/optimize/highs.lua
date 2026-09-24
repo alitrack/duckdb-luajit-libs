@@ -4,6 +4,7 @@
 --        libhighs（MIT 许可），SQL 里解排产/调度/资源分配/组合优化
 -- @source: original（duckdb-luajit 系列）
 -- @requires: libhighs.so（HiGHS ≥1.6，MIT）——编译期安装：
+-- @license: MIT (duckdb-luajit-libs project)
 --   git clone https://github.com/ERGO-Code/HiGHS
 --   cmake -S HiGHS -B build -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=ON
 --   cmake --build build -j && sudo cmake --install build

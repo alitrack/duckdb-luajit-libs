@@ -1,4 +1,5 @@
 -- incremental.lua: 增量加载（水位游标）——append-only 表只加载新行（2026-08-13）
+-- @license: MIT (duckdb-luajit-libs project)
 -- 需要普通模式（非 trusted）：_duckdb_call / _duckdb_query
 --
 -- 用法（install 后）：

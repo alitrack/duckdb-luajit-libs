@@ -11,6 +11,7 @@
 --       两者都返回 JSON 对象字符串；空文件返回 '{}'。
 -- @source: original（duckdb-luajit 系列，自包含无外部依赖）
 -- @requires: none
+-- @license: MIT (duckdb-luajit-libs project)
 --
 -- Usage (duckdb-luajit, scalar mode):
 --   install:  SELECT * FROM luajit_module(mode:='install', sql_name:='tomlini');

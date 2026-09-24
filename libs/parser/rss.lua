@@ -16,6 +16,7 @@
 --       解析器移植自本仓库 xml.lua（proven：实体/CDATA/PI/声明/属性/嵌套）。
 -- @source: 自包含（解析器源自本仓库 xml.lua）
 -- @requires: none
+-- @license: MIT (duckdb-luajit-libs project)
 --
 -- Usage:
 --   SELECT luajit_s('rss', {op:'detect', v:'<rss version="2.0"><channel>...</channel></rss>'});  -- rss2

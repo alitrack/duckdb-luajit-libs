@@ -3,6 +3,7 @@
 -- @desc: 随机数生成（40+ 分布，statrs + rand_distr 内核，LuaJIT FFI 直调）
 --        支持单次采样和批量向量化采样，向量化批量比逐行快 50-100×
 -- @source: librng_capi.so（Rust cdylib, MIT/Apache 2.0, 554KB）
+-- @license: MIT OR Apache-2.0 (Rust cdylib, sources in repo)
 --
 -- 用法：
 --   SELECT luajit_s('rng', '{"op":"normal", "mu":0, "sigma":1}');

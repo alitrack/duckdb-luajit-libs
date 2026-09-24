@@ -18,6 +18,7 @@
 --       已知 1 处差异：1:2:3:4:5:6:7:8 本库判 public（正确），Python is_reserved 误判 reserved。
 -- @source: 自包含
 -- @requires: none
+-- @license: MIT (duckdb-luajit-libs project)
 --
 -- Usage (duckdb-luajit):
 --   SELECT luajit_s('cidr', {op: 'in_cidr', v: '192.168.1.5', cidr: '192.168.0.0/16'});  -- true

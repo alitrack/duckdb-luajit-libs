@@ -1,0 +1,904 @@
+{
+  "bomFormat": "CycloneDX",
+  "specVersion": "1.5",
+  "version": 1,
+  "metadata": {
+    "component": {
+      "type": "application",
+      "name": "duckdb-luajit-libs",
+      "license": {
+        "id": "MIT"
+      }
+    }
+  },
+  "components": [
+    {
+      "type": "library",
+      "name": "dicom",
+      "purl": "pkg:github/alitrack/duckdb-luajit-libs@libs/datasource/dicom.lua",
+      "licenses": [
+        {
+          "license": {
+            "name": "MIT (duckdb-luajit-libs project)"
+          }
+        }
+      ],
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "e2b198ae79e0ac5ad66905f5abf604766557df296f9525f1256b2e5469ad6cd6"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "dirscan",
+      "purl": "pkg:github/alitrack/duckdb-luajit-libs@libs/datasource/dirscan.lua",
+      "licenses": [
+        {
+          "license": {
+            "name": "MIT (duckdb-luajit-libs project)"
+          }
+        }
+      ],
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "f1ef9847e943aecf7d885fc021935ff75854eafd920d6159f3dd448fd163a338"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "inv_ofd",
+      "purl": "pkg:github/alitrack/duckdb-luajit-libs@libs/datasource/inv_ofd.lua",
+      "licenses": [
+        {
+          "license": {
+            "name": "MIT (duckdb-luajit-libs project)"
+          }
+        }
+      ],
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "a63694c004a5acafe60b3ac2ef69567dbe6706ad6138188009df21e67371e915"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "tdx",
+      "purl": "pkg:github/alitrack/duckdb-luajit-libs@libs/datasource/tdx.lua",
+      "licenses": [
+        {
+          "license": {
+            "name": "MIT (duckdb-luajit-libs project)"
+          }
+        }
+      ],
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "66a1e3113ba8237b780acdbab79f2ea317a8e2c76f60c02bdd7651d58fb4f7cb"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "dbcli",
+      "purl": "pkg:github/alitrack/duckdb-luajit-libs@libs/db/dbcli.lua",
+      "licenses": [
+        {
+          "license": {
+            "name": "MIT (duckdb-luajit-libs project)"
+          }
+        }
+      ],
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "69b773bdd4db96b0f1b9140fd07f33c0ecb0501e6f9633fcf5cefe734b7a2fe7"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "usql",
+      "purl": "pkg:github/alitrack/duckdb-luajit-libs@libs/db/usql.lua",
+      "licenses": [
+        {
+          "license": {
+            "name": "MIT (alitrack/usql-bridge + original)"
+          }
+        }
+      ],
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "5d36914e290bcc2414b07191d46e49b7c2e17c80c8b34ab19c19bacd49ced597"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "entity",
+      "purl": "pkg:github/alitrack/duckdb-luajit-libs@libs/entity/entity.lua",
+      "licenses": [
+        {
+          "license": {
+            "name": "MIT (duckdb-luajit-libs project)"
+          }
+        }
+      ],
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "d38a8aeed0088b60127c7ad9381e329331d0f0ce5f4e027b4f554697fb645929"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "export",
+      "purl": "pkg:github/alitrack/duckdb-luajit-libs@libs/export/export.lua",
+      "licenses": [
+        {
+          "license": {
+            "name": "MIT (duckdb-luajit-libs project)"
+          }
+        }
+      ],
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "d231d2d806f4c372cf6b93a27109066f4294bd1110eebdc66804f21248d74fa5"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "fake",
+      "purl": "pkg:github/alitrack/duckdb-luajit-libs@libs/fake/fake.lua",
+      "licenses": [
+        {
+          "license": {
+            "name": "MIT (duckdb-luajit-libs project)"
+          }
+        }
+      ],
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "2067ea520c0eb9c829a243fbbb9e540a6457dbab9c3bafbcc4916599857f741f"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "linalg",
+      "purl": "pkg:github/alitrack/duckdb-luajit-libs@libs/linalg/linalg.lua",
+      "licenses": [
+        {
+          "license": {
+            "name": "MIT (duckdb-luajit-libs project)"
+          }
+        }
+      ],
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "1af462f372c37a3cbcede3d03f9b45bf4b283e5c021f6d2bdc27fcac787cead6"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "classifier",
+      "purl": "pkg:github/alitrack/duckdb-luajit-libs@libs/ml/classifier.lua",
+      "licenses": [
+        {
+          "license": {
+            "name": "MIT OR Apache-2.0 (Rust cdylib, sources in repo)"
+          }
+        }
+      ],
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "b4e4fdaa65bbda0ad1e0f7a24d30fb10374d3af9ed8d5ce91c86eb74b5711447"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "highs",
+      "purl": "pkg:github/alitrack/duckdb-luajit-libs@libs/optimize/highs.lua",
+      "licenses": [
+        {
+          "license": {
+            "name": "MIT (duckdb-luajit-libs project)"
+          }
+        }
+      ],
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "7aaa9a57783e24b35fa9c86e9e03411f8d98d9080252fe95c88cd16344a46499"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "csvdialect",
+      "purl": "pkg:github/alitrack/duckdb-luajit-libs@libs/parser/csvdialect.lua",
+      "licenses": [
+        {
+          "license": {
+            "name": "MIT (duckdb-luajit-libs project)"
+          }
+        }
+      ],
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "fca09f18613e4d12d2649d70b97fbaad06d67110054e5b0b6a3d6767bc69a0df"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "epub",
+      "purl": "pkg:github/alitrack/duckdb-luajit-libs@libs/parser/epub.lua",
+      "licenses": [
+        {
+          "license": {
+            "name": "MIT (duckdb-luajit-libs project)"
+          }
+        }
+      ],
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "0070629f4cbc5daebd8d6171b168ee712ee89374a14cfc15f274f19bc1b2542f"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "htmlx",
+      "purl": "pkg:github/alitrack/duckdb-luajit-libs@libs/parser/htmlx.lua",
+      "licenses": [
+        {
+          "license": {
+            "name": "MIT (duckdb-luajit-libs project)"
+          }
+        }
+      ],
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "061c45ba778656402443fd4459551cc16df774b60fbeeb5168b1194d97981df0"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "id3",
+      "purl": "pkg:github/alitrack/duckdb-luajit-libs@libs/parser/id3.lua",
+      "licenses": [
+        {
+          "license": {
+            "name": "MIT (duckdb-luajit-libs project)"
+          }
+        }
+      ],
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "3a13f632c4e4db6ac0e54398a01dd3b4db14f430bf4a1e70f95911832196d3e4"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "json",
+      "purl": "pkg:github/alitrack/duckdb-luajit-libs@libs/parser/json.lua",
+      "licenses": [
+        {
+          "license": {
+            "name": "MIT (vendored rxi/json.lua, rxi 2020)"
+          }
+        }
+      ],
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "30a08d4432d2e8da9402b40babf4b5b87228ec1cc783053bcba0b580c4368f35"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "jsonpatch",
+      "purl": "pkg:github/alitrack/duckdb-luajit-libs@libs/parser/jsonpatch.lua",
+      "licenses": [
+        {
+          "license": {
+            "name": "MIT (duckdb-luajit-libs project)"
+          }
+        }
+      ],
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "fa0b8f4141382930c2df8e1790cfde986d95c471d1208168fa968bfe3c8516f3"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "jsonpath",
+      "purl": "pkg:github/alitrack/duckdb-luajit-libs@libs/parser/jsonpath.lua",
+      "licenses": [
+        {
+          "license": {
+            "name": "MIT (duckdb-luajit-libs project)"
+          }
+        }
+      ],
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "ac39e86d44faa2b2862e8918603df862c2445a518594bdc0712fbc928903aa07"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "log",
+      "purl": "pkg:github/alitrack/duckdb-luajit-libs@libs/parser/log.lua",
+      "licenses": [
+        {
+          "license": {
+            "name": "MIT (duckdb-luajit-libs project)"
+          }
+        }
+      ],
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "9b9550464350d3fb70ed48cb2f41a6ea6873994fada31d52395c9506e893fd6a"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "markdown",
+      "purl": "pkg:github/alitrack/duckdb-luajit-libs@libs/parser/markdown.lua",
+      "licenses": [
+        {
+          "license": {
+            "name": "MIT (duckdb-luajit-libs project)"
+          }
+        }
+      ],
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "7df453df76ab6c84f953a0a347ceea73df5ec77150d7c8c3913ea06f83291648"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "rss",
+      "purl": "pkg:github/alitrack/duckdb-luajit-libs@libs/parser/rss.lua",
+      "licenses": [
+        {
+          "license": {
+            "name": "MIT (duckdb-luajit-libs project)"
+          }
+        }
+      ],
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "e00ed542bc270e1c73902715c75083e64831840d7d54cccd5a190b71dec0cd8d"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "tomlini",
+      "purl": "pkg:github/alitrack/duckdb-luajit-libs@libs/parser/tomlini.lua",
+      "licenses": [
+        {
+          "license": {
+            "name": "MIT (duckdb-luajit-libs project)"
+          }
+        }
+      ],
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "c1be7a9aa78a3162aa61ad78083d8363926b324b99decf7da28e61fead6cf3e0"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "unzip",
+      "purl": "pkg:github/alitrack/duckdb-luajit-libs@libs/parser/unzip.lua",
+      "licenses": [
+        {
+          "license": {
+            "name": "MIT (duckdb-luajit-libs project)"
+          }
+        }
+      ],
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "fc67e4942fb84cf0fbe3d71dc0ba0154fc48d7b70e3f07008c3e13b61cbe1857"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "xml",
+      "purl": "pkg:github/alitrack/duckdb-luajit-libs@libs/parser/xml.lua",
+      "licenses": [
+        {
+          "license": {
+            "name": "MIT (duckdb-luajit-libs project)"
+          }
+        }
+      ],
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "974609fa3c7c4d6d1a68fc11decc230f4188ffe4aa9ae74ed0edeac1a2befceb"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "yaml",
+      "purl": "pkg:github/alitrack/duckdb-luajit-libs@libs/parser/yaml.lua",
+      "licenses": [
+        {
+          "license": {
+            "name": "MIT (duckdb-luajit-libs project)"
+          }
+        }
+      ],
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "80a3db2c141e34509135a1d62afc53131809562618152fe074a16ebe6f63f22f"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "zip_list",
+      "purl": "pkg:github/alitrack/duckdb-luajit-libs@libs/parser/zip_list.lua",
+      "licenses": [
+        {
+          "license": {
+            "name": "MIT (duckdb-luajit-libs project)"
+          }
+        }
+      ],
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "7acd355fc6f495308053d0de1a90f256b7d1c41772a1d2845622f5e3d00afd10"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "privacy",
+      "purl": "pkg:github/alitrack/duckdb-luajit-libs@libs/privacy/privacy.lua",
+      "licenses": [
+        {
+          "license": {
+            "name": "MIT (duckdb-luajit-libs project)"
+          }
+        }
+      ],
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "66756b368d529cd9effbb0b434ea1514e6f5898833d375df596e634adc6602c2"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "psi",
+      "purl": "pkg:github/alitrack/duckdb-luajit-libs@libs/quality/psi.lua",
+      "licenses": [
+        {
+          "license": {
+            "name": "MIT (duckdb-luajit-libs project)"
+          }
+        }
+      ],
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "90547e199c64ae3b80ecc583f9e1201e8280585ed3fd626f055dad01bca76522"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "audit_chain",
+      "purl": "pkg:github/alitrack/duckdb-luajit-libs@libs/security/audit_chain.lua",
+      "licenses": [
+        {
+          "license": {
+            "name": "MIT (duckdb-luajit-libs project)"
+          }
+        }
+      ],
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "7c6b087f8bf5ecbf1c16176b88a21c73b95413ad75aca193ccee5f571a795f72"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "rbac",
+      "purl": "pkg:github/alitrack/duckdb-luajit-libs@libs/security/rbac.lua",
+      "licenses": [
+        {
+          "license": {
+            "name": "MIT (duckdb-luajit-libs project)"
+          }
+        }
+      ],
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "8b7c49896af09bd416b27da6c96fdba9b7e644b92490cf6ad0363f8c87ba0706"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "rng",
+      "purl": "pkg:github/alitrack/duckdb-luajit-libs@libs/stats/rng.lua",
+      "licenses": [
+        {
+          "license": {
+            "name": "MIT OR Apache-2.0 (Rust cdylib, sources in repo)"
+          }
+        }
+      ],
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "16b588b160ba3eb2f1cda447fe2d4f3152c1b4f81f46a859aca331a33b476c50"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "init",
+      "purl": "pkg:github/alitrack/duckdb-luajit-libs@libs/tooling/init.lua",
+      "licenses": [
+        {
+          "license": {
+            "name": "MIT (duckdb-luajit-libs project)"
+          }
+        }
+      ],
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "10eb4c17db02797704403d4a1fccfedc8aa6431e14d49cbd4d3fcabecc3c6f32"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "base64",
+      "purl": "pkg:github/alitrack/duckdb-luajit-libs@libs/udf/base64.lua",
+      "licenses": [
+        {
+          "license": {
+            "name": "public domain (vendored iskolbin/lbase64, 2017)"
+          }
+        }
+      ],
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "87afaaad8916ecef5da33f1c9f1b670409508b88e09f27c1a9e02562bd4f9954"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "cidr",
+      "purl": "pkg:github/alitrack/duckdb-luajit-libs@libs/udf/cidr.lua",
+      "licenses": [
+        {
+          "license": {
+            "name": "MIT (duckdb-luajit-libs project)"
+          }
+        }
+      ],
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "07b5d5eb5221e70880663ee1069efa30ebb73c8d8d541dabd80d151d9c603398"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "cncheck",
+      "purl": "pkg:github/alitrack/duckdb-luajit-libs@libs/udf/cncheck.lua",
+      "licenses": [
+        {
+          "license": {
+            "name": "MIT (duckdb-luajit-libs project)"
+          }
+        }
+      ],
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "59075e1313510c408cdedbee32505a2c8b9e516cc7568182ca1ed4e76eb9145f"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "crc32",
+      "purl": "pkg:github/alitrack/duckdb-luajit-libs@libs/udf/crc32.lua",
+      "licenses": [
+        {
+          "license": {
+            "name": "MIT (duckdb-luajit-libs project)"
+          }
+        }
+      ],
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "a3f9b859ca70edb0f597f931b6411566bacbb3f91f47563ac4a01137879ee232"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "curl_ffi",
+      "purl": "pkg:github/alitrack/duckdb-luajit-libs@libs/udf/curl_ffi.lua",
+      "licenses": [
+        {
+          "license": {
+            "name": "MIT (duckdb-luajit-libs project)"
+          }
+        }
+      ],
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "74c0558428fdf4e230b208a53621c7fb080ab65ebd81fcfc1771084cf4c6d4e1"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "fuzzy",
+      "purl": "pkg:github/alitrack/duckdb-luajit-libs@libs/udf/fuzzy.lua",
+      "licenses": [
+        {
+          "license": {
+            "name": "MIT (duckdb-luajit-libs project)"
+          }
+        }
+      ],
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "d91373b647a7e8f4acf51807fd16e5e14244406a2db8a174b4d624c14cac2b57"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "html_escape",
+      "purl": "pkg:github/alitrack/duckdb-luajit-libs@libs/udf/html_escape.lua",
+      "licenses": [
+        {
+          "license": {
+            "name": "MIT (duckdb-luajit-libs project)"
+          }
+        }
+      ],
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "9cbf31779e60ab0017c662db199720f0f95062f070bdb617e8dfa56990feb090"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "iconv",
+      "purl": "pkg:github/alitrack/duckdb-luajit-libs@libs/udf/iconv.lua",
+      "licenses": [
+        {
+          "license": {
+            "name": "MIT (duckdb-luajit-libs project)"
+          }
+        }
+      ],
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "f0e5a1686df12d75b3ef32b4c7c2409958d06c4c5dae62898aefeb892487ae4e"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "jev_ask",
+      "purl": "pkg:github/alitrack/duckdb-luajit-libs@libs/udf/jev_ask.lua",
+      "licenses": [
+        {
+          "license": {
+            "name": "MIT (duckdb-luajit-libs project)"
+          }
+        }
+      ],
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "cfab6aca8f226d9a86d6915f17b13bc5e7841b7cf6893709d8768a9e7439cc42"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "llm_extract",
+      "purl": "pkg:github/alitrack/duckdb-luajit-libs@libs/udf/llm_extract.lua",
+      "licenses": [
+        {
+          "license": {
+            "name": "MIT (duckdb-luajit-libs project)"
+          }
+        }
+      ],
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "0522f5cba6f6f941fd42c640208bd4d30caf3cb758b334ad1dd58fa2346cb0ed"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "pinyin",
+      "purl": "pkg:github/alitrack/duckdb-luajit-libs@libs/udf/pinyin.lua",
+      "licenses": [
+        {
+          "license": {
+            "name": "MIT (vendored pinyin-data dictionary, mozillazg)"
+          }
+        }
+      ],
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "aa111e2c4df794dc51aa6a86971811321b850e7502e04bc05aae8c54ab739fe5"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "pinyin",
+      "purl": "pkg:github/alitrack/duckdb-luajit-libs@libs/udf/pinyin_engine.lua",
+      "licenses": [
+        {
+          "license": {
+            "name": "MIT (vendored pinyin-data dictionary, mozillazg)"
+          }
+        }
+      ],
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "a2802372381c7bc3e5d3ebc4d3aa7548c2545f6b7bfef718c6297b6563e18454"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "qr",
+      "purl": "pkg:github/alitrack/duckdb-luajit-libs@libs/udf/qr.lua",
+      "licenses": [
+        {
+          "license": {
+            "name": "MIT (algorithm layout) / Apache-2.0 (Nayuki QR generator)"
+          }
+        }
+      ],
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "54caaec04a3086a1b681a756d0a4344293c8322f1a80f2cbc61187806cfcffe2"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "tail_file",
+      "purl": "pkg:github/alitrack/duckdb-luajit-libs@libs/udf/tail_file.lua",
+      "licenses": [
+        {
+          "license": {
+            "name": "MIT (duckdb-luajit-libs project)"
+          }
+        }
+      ],
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "55470ba60279dbbf0dd5e0dc7ba5a2f2f700217e80b36103763bb6ae55f31525"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "uuid",
+      "purl": "pkg:github/alitrack/duckdb-luajit-libs@libs/udf/uuid.lua",
+      "licenses": [
+        {
+          "license": {
+            "name": "MIT (duckdb-luajit-libs project)"
+          }
+        }
+      ],
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "e4c3b8c3fbea160b7c822d80ee5a4d83a89d63e09ae580ee108e913a9ba73089"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "OpenBLAS/LAPACK",
+      "licenses": [
+        {
+          "license": {
+            "name": "BSD-3-Clause (OpenBLAS)"
+          }
+        }
+      ],
+      "scope": "excluded"
+    },
+    {
+      "type": "library",
+      "name": "HiGHS",
+      "licenses": [
+        {
+          "license": {
+            "name": "MIT"
+          }
+        }
+      ],
+      "scope": "excluded"
+    }
+  ]
+}

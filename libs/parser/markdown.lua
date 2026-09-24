@@ -13,6 +13,7 @@
 --       代码块内容先被"抠出"，其中的 #/[]/- 不会被误判为标题/链接/列表。
 -- @source: original（duckdb-luajit 系列，自包含无外部依赖）
 -- @requires: 无
+-- @license: MIT (duckdb-luajit-libs project)
 --
 -- Usage (duckdb-luajit, scalar mode):
 --   install:  SELECT * FROM luajit_module(mode:='install', sql_name:='markdown');

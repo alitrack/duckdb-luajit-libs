@@ -1,4 +1,5 @@
 -- iconv.lua 断言测试：cd libs/udf && luajit iconv_test.lua
+-- @license: MIT (duckdb-luajit-libs project)
 -- 覆盖：GBK↔UTF-8 转码锚点 / //IGNORE 剔半个字 / enc_detect 全分支 / lang_detect / iconv_file 全流程
 local fn = assert(dofile('iconv.lua'))
 

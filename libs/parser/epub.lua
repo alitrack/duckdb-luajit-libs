@@ -14,6 +14,7 @@
 --       XML 抽取是针对性解析（非完整 XML 引擎），异常嵌套/CDATA 复杂结构可能漏。
 -- @source: 自包含（zip/inflate 逐字移植自 libs/parser/unzip.lua；XML 抽取参考 xml.lua 思路）
 -- @requires: zlib（Linux/macOS 内置；Windows zlib1.dll 入 PATH）。需普通模式（读文件）。
+-- @license: MIT (duckdb-luajit-libs project)
 --
 -- Usage (duckdb-luajit):
 --   元数据:  SELECT luajit_s('epub', {file: '/x/book.epub', op: 'metadata'});

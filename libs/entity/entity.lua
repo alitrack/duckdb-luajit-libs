@@ -1,6 +1,7 @@
 -- @lib: entity
 -- @category: entity
 -- @desc: 实体解析/记录链接管道（纯 Lua，自包含，UTF-8 感知）——blocking → 相似度打分 → 连通分量聚类。
+-- @license: MIT (duckdb-luajit-libs project)
 --       op='block'：生成 blocking 键。p.v 字符串；p.mode:
 --         'soundex'（英文姓氏经典 Soundex，4 字符）；
 --         'first3'（标准化后首 3 字符，中英文通用）；

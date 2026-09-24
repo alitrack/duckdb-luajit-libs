@@ -2,6 +2,7 @@
 -- @category: parser
 -- @desc: HTML → 结构化抽取（纯 Lua，自包含，无 FFI）—— 从 HTML 文本提取 title / 链接 /
 -- @license: MIT (duckdb-luajit-libs project)
+-- @maturity: tested
 --       表格 / 纯文本，配 rss 做内容抽取。DuckDB 无内建 HTML 解析。
 --       op 选项（v = HTML 文本；或用 file = HTML 文件路径，库内 io.open 读取）：
 --         'title' → <title> 文本（无则 null）

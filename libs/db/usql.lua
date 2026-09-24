@@ -4,6 +4,7 @@
 -- @source: alitrack/usql-bridge（Go 桥，MIT）+ 本 FFI 桥（original）
 -- @requires: luajit FFI 可用（默认非 trusted 模式）；usql-bridge 工件（按平台自动解析，见下）
 -- @license: MIT (alitrack/usql-bridge + original)
+-- @maturity: tested
 -- 自包含：spec 用内联极简 JSON 解析（扁平 string+number 对象），不依赖 labs 的 json 库。
 --
 -- 工件按平台选名（usql-bridge release v0.1.1 起覆盖全平台）：

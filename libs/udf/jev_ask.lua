@@ -6,6 +6,7 @@
 -- @source: original（duckdb-luajit 系列）
 -- @requires: 一个跑着的 jev 型决策服务（HTTP 契约 POST /v1/systemone）。
 -- @license: MIT (duckdb-luajit-libs project)
+-- @maturity: tested
 --            传输层**自动选择**：同会话已装 curl_ffi（FFI dlopen libcurl，零 fork）→ 优先用它；
 --            未装则回退 curl CLI（io.popen）。大批量 per-row 调用建议装 curl_ffi（≈10x，见 curl_ffi.lua）。
 -- ⚠️ 需普通模式（非 trusted）：io.popen / ffi.load 发起 HTTP 请求（与 llm_extract 同档）

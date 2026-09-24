@@ -4,6 +4,7 @@
 -- @source: original（duckdb-luajit 系列）
 -- @requires: ffi（float32 reinterpret）
 -- @license: MIT (duckdb-luajit-libs project)
+-- @maturity: tested
 -- Usage (luajit_table, table mode): source returns function(list_str) → rows[]
 --   install: SELECT * FROM luajit_module(mode:='install', sql_name:='tdx');
 --   call:    SELECT * FROM luajit_table('tdx', list := '/path/sh000001.day');

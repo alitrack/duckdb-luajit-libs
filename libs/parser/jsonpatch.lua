@@ -16,6 +16,7 @@
 -- @source: 自包含（JSON 编解码参考 rxi/json.lua MIT 思路自写；RFC 6901/6902）
 -- @requires: none
 -- @license: MIT (duckdb-luajit-libs project)
+-- @maturity: tested
 --
 -- Usage:
 --   SELECT luajit_s('jsonpatch', {op:'apply', doc:'{"a":1}',

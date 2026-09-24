@@ -14,6 +14,7 @@
 -- @source: original（duckdb-luajit 系列，自包含无外部依赖）
 -- @requires: 无
 -- @license: MIT (duckdb-luajit-libs project)
+-- @maturity: tested
 --
 -- Usage (duckdb-luajit, scalar mode):
 --   install:  SELECT * FROM luajit_module(mode:='install', sql_name:='markdown');

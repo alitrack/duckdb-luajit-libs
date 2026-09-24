@@ -16,6 +16,7 @@
 -- @source: original（duckdb-luajit 系列，自包含无外部依赖）
 -- @requires: 读文件需普通模式（非 trusted）；内联模式无需
 -- @license: MIT (duckdb-luajit-libs project)
+-- @maturity: tested
 --
 -- Usage (duckdb-luajit, scalar mode):
 --   install:  SELECT * FROM luajit_module(mode:='install', sql_name:='tail_file');

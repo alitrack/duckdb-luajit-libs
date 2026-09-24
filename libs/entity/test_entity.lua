@@ -1,5 +1,6 @@
 -- entity.lua 锚定测试
 -- @license: MIT (duckdb-luajit-libs project)
+-- @maturity: poc
 local f = dofile('entity.lua')
 local passed, failed = 0, 0
 local function check(desc, got, expect)

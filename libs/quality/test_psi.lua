@@ -1,5 +1,6 @@
 -- psi.lua 锚定测试 v2：精确可算占比锚点 + 相对性质断言
 -- @license: MIT (duckdb-luajit-libs project)
+-- @maturity: poc
 local f = dofile('psi.lua')
 local passed, failed = 0, 0
 local function check(desc, got, expect)

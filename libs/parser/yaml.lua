@@ -7,6 +7,7 @@
 -- @source: original（duckdb-luajit 系列，自包含无外部依赖；JSON 编解码为精简内嵌实现）
 -- @requires: none
 -- @license: MIT (duckdb-luajit-libs project)
+-- @maturity: tested
 -- 支持子集（诚实边界）：块映射/序列/流集合/引号与裸标量/注释/块标量(|,>)。
 -- 未支持：锚点 & 别名 *、多文档 ---、行内标签 !!、复杂多行裸标量折行。
 --

@@ -2,6 +2,7 @@
 -- @category: privacy
 -- @desc: 隐私工程原语（纯 Lua，自包含）——差分隐私机制 + PII 脱敏 + k-匿名（Mondrian 简化版）。
 -- @license: MIT (duckdb-luajit-libs project)
+-- @maturity: audited
 --   【差分隐私】（ε-差分隐私，敏感度 Δf）
 --   op='dp_count'：加噪计数。p.true_count 真实计数、p.epsilon（默认 1.0）、p.sensitivity（默认 1，计数恒为 1）
 --     → 返回 round(true_count + Laplace(0, Δf/ε))，整数。

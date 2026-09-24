@@ -1,5 +1,6 @@
 -- scd2.lua: 缓慢变化维度（SCD 类型 2）——属性变化保留历史版本（2026-08-13）
 -- @license: MIT (duckdb-luajit-libs project)
+-- @maturity: tested
 -- 需要普通模式（非 trusted）：_duckdb_call / _duckdb_query
 --
 -- 用法（install 后）：

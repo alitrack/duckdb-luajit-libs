@@ -7,6 +7,7 @@
 --        训练好的 model 是自包含 JSON 资产，predict 零网络、毫秒级。
 -- @source: libclassifier_capi.so（Rust cdylib, MIT/Apache 2.0, ~770KB，源码
 -- @license: MIT OR Apache-2.0 (Rust cdylib, sources in repo)
+-- @maturity: audited
 --          /mnt/d/wsl2/classifier_capi/，编译 cargo build --offline --release）
 --
 -- 用法（duckdb-luajit，非 trusted 模式）：

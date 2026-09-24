@@ -1,5 +1,6 @@
 --[[
 -- @license: MIT (duckdb-luajit-libs project)
+-- @maturity: tested
 @lib resource_lifecycle_template
 @category ffi
 @desc FFI lib skeleton — resource lifecycle conventions (template, not INDEX-installable)

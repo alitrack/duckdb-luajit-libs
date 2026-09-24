@@ -1,5 +1,6 @@
 -- probe: FFI vs curl-CLI 每行传输开销对拍（PoC 用，不进 INDEX）
 -- @license: MIT (duckdb-luajit-libs project)
+-- @maturity: poc
 -- 同一 URL（jev-clone /healthz，几 ms 级响应 → fork 开销占比最大、对比最清晰）
 -- 计时用 FFI clock_gettime(CLOCK_MONOTONIC)：wall-clock、μs 级；os.clock 是 CPU 时间
 -- 不适合含 I/O 的场景，jit.time 在嵌入式 LuaJIT 里被禁用。

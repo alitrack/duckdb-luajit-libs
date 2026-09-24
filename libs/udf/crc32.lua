@@ -4,6 +4,7 @@
 -- @source: original（duckdb-luajit 系列；标准 CRC-32 算法，查表法）
 -- @requires: LuaJIT bit 库（duckdb-luajit 环境必有）
 -- @license: MIT (duckdb-luajit-libs project)
+-- @maturity: tested
 -- Usage (duckdb-luajit):
 --   install: SELECT * FROM luajit_module(mode:='install', sql_name:='crc32');
 --   call:    SELECT luajit_s('crc32', 'hello');   -- → 3610A686

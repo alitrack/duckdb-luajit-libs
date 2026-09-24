@@ -2,6 +2,7 @@
 -- @category: quality
 -- @desc: 数据漂移检测（纯 Lua，自包含）——PSI（Population Stability Index）/ KL 散度 / 卡方。
 -- @license: MIT (duckdb-luajit-libs project)
+-- @maturity: tested
 --       op='psi'：两个分布之间的 PSI（占比分箱版）。输入 p.e = 期望(参考)占比数组、p.a = 实际占比数组；
 --                 或 p.raw_e/p.raw_a = 原始数值数组（自动等宽分箱，p.bins 默认 10）；
 --                 或 p.raw_e/p.raw_a + p.breaks = 显式边界数组（自动做占比换算）。

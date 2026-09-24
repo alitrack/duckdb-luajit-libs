@@ -2,6 +2,7 @@
 -- @category: parser
 -- @desc: CSV 方言探测 + 纯 Lua 解析（自含，无 FFI）—— DuckDB read_csv 的采样嗅探对
 -- @license: MIT (duckdb-luajit-libs project)
+-- @maturity: tested
 --       多行/引号内嵌分隔符/欧洲分号格式常误判，本库用确定性状态机做「探测方言 + 精确解析」。
 --       op 选项（v = CSV 文本；或用 file = CSV 文件路径，库内 io.open 读取）：
 --         'detect' → 方言 JSON：{delimiter, quotechar, doublequote, skipinitialspace, has_header, ncols}

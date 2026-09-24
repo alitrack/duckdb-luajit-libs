@@ -6,6 +6,7 @@
 -- @source: original（duckdb-luajit 系列）
 -- @requires: zlib（Linux/macOS 内置 libz；Windows 需 zlib1.dll）——zip 解压逻辑内嵌，零库依赖
 -- @license: MIT (duckdb-luajit-libs project)
+-- @maturity: tested
 -- ⚠️ 需普通模式（非 trusted）：io.open 读文件
 --
 -- Usage (duckdb-luajit):

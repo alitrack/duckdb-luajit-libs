@@ -4,6 +4,7 @@
 -- @source: original（duckdb-luajit 系列）
 -- @requires: none
 -- @license: MIT (duckdb-luajit-libs project)
+-- @maturity: tested
 -- DICOM tag parser for duckdb-luajit (LuaJIT 5.1, no string.unpack)
 -- Explicit VR Little Endian. Returns one flat "|"-joined row per file.
 -- Usage (luajit_table, table mode): source returns function(list_str) → rows[]

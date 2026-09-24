@@ -4,6 +4,7 @@
 -- @source: original（duckdb-luajit 系列）
 -- @requires: 本机已安装对应 CLI；io.popen 可用（默认非 trusted 模式）
 -- @license: MIT (duckdb-luajit-libs project)
+-- @maturity: tested
 --
 -- 形态：表函数（luajit_table）。list 参数 = JSON 规格字符串：
 --   {"client":"sqlite3","args":["-json","/tmp/x.db"],"sql":"SELECT 1 AS a","kind":"json"}

@@ -1,5 +1,6 @@
 -- bench_four.lua — 四种加载方式统一基准:同题、同循环、同进程
 -- @license: MIT (duckdb-luajit-libs project)
+-- @maturity: poc
 --   1. 纯 Lua v2 (libs/mcp/sudoku.lua)
 --   2. gcc -O3 预编译 .so
 --   3. tcc -shared 编译的 .so

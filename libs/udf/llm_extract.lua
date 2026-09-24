@@ -6,6 +6,7 @@
 -- @source: original（duckdb-luajit 系列）
 -- @requires: curl CLI（io.popen 调系统 curl：Windows 10+ 自带 curl.exe）
 -- @license: MIT (duckdb-luajit-libs project)
+-- @maturity: tested
 -- ⚠️ 需普通模式（非 trusted）：io.popen / os 用于发起 HTTP 请求
 --
 -- Usage (duckdb-luajit):

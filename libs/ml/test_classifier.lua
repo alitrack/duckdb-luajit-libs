@@ -1,5 +1,6 @@
 -- test_classifier.lua — Lua 级单测（luajit CLI 直跑，必须 cd 到 libs/ml/）
 -- @license: MIT (duckdb-luajit-libs project)
+-- @maturity: poc
 -- 覆盖：train(含 auto cal split) / predict / evaluate / 模型持久化往返 /
 --       错误分支。断言失败即非零退出。
 

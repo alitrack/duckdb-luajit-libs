@@ -4,6 +4,7 @@
 -- @source: original（duckdb-luajit 系列）
 -- @requires: none（需普通模式——_duckdb_call 回调在 trusted 沙箱下不可用）
 -- @license: MIT (duckdb-luajit-libs project)
+-- @maturity: tested
 -- Stored-procedure style export for duckdb-luajit (LuaJIT 5.1).
 -- Runs COPY via the _duckdb_call callback on the extension's second connection.
 -- Usage:

@@ -1,5 +1,6 @@
 -- inv_ofd.lua 断言测试。
 -- @license: MIT (duckdb-luajit-libs project)
+-- @maturity: poc
 -- 需要独立 luajit 解释器的环境（CI/macOS）：cd libs/datasource && luajit inv_ofd_test.lua
 -- 无独立 luajit 的主机（如本仓 WSL，扩展内嵌 LuaJIT）：跑 inv_ofd_probe.lua 走真扩展
 --   bash make_poc.sh   # 生成 fixture + 13 断言 + 远程 install 全链路 → 仓库根 PoC-inv-ofd-output.txt

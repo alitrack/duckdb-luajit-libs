@@ -5,6 +5,7 @@
 -- @source: original（duckdb-luajit 系列）
 -- @requires: _duckdb_query（普通模式；trusted 沙箱下不可用）
 -- @license: MIT (duckdb-luajit-libs project)
+-- @maturity: tested
 -- Role-Based Access Control policy engine for DuckDB Quack (LuaJIT 5.1).
 --
 -- 定位：Quack 是强制点（每条查询 PREPARE 前跑 authorization 钩子），本库是策略引擎。

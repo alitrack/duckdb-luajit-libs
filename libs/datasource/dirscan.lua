@@ -4,6 +4,7 @@
 -- @source: original（duckdb-luajit 系列）
 -- @requires: none（io.popen 列目录，普通模式）
 -- @license: MIT (duckdb-luajit-libs project)
+-- @maturity: tested
 -- Directory metadata scanner for duckdb-luajit (LuaJIT 5.1, no string.unpack)
 -- One flat "|"-joined row per file: path|type|size|exif_cam|exif_dt|pdf_title|pdf_author
 -- File type via magic bytes; EXIF via JPEG APP1/TIFF IFD0; PDF via %PDF + tail /Info scan.

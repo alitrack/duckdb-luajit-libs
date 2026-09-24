@@ -4,6 +4,7 @@
 -- @source: vendored https://github.com/iskolbin/lbase64 (public domain, iskolbin 2017)
 -- @requires: none（LuaJIT bit 或纯 Lua 回退）
 -- @license: public domain (vendored iskolbin/lbase64, 2017)
+-- @maturity: tested
 -- Usage (duckdb-luajit):
 --   install:  SELECT * FROM luajit_module(mode:='install', sql_name:='base64');
 --   encode:   SELECT luajit_s('base64', {v: 'hello', op: 'encode'});

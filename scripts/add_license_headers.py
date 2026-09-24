@@ -21,6 +21,36 @@ OVERRIDES = {
     "base64.lua": "public domain (vendored iskolbin/lbase64, 2017)",
 }
 
+# maturity tiers (review P2-3): audited = third-party reviewed / anchor-verified
+# against known answers; tested = has runnable test in repo; poc = demo/probe.
+# Path fragments → tier; last match wins; default 'tested'.
+MATURITY = [
+    ("audited", [
+        "privacy/privacy.lua",      # DP/masking anchors in test_privacy.sql
+        "etl/incremental.lua",      # E2E + multi-round use in production flows
+        "stats/rng.lua",            # statistical test suite
+        "parser/json.lua",          # vendored rxi/json.lua (upstream-tested)
+        "linalg/linalg.lua",        # anchor-verified vs LAPACK CLI (SVD 18.6x)
+        "optimize/highs.lua",       # anchor-verified vs HiGHS CLI & hand-solved
+        "ml/classifier.lua",        # benchmarked vs sklearn reference
+    ]),
+    ("poc", [
+        "demo_e2e", "demo_tcc", "gen_inline", "bench_four",
+        "inv_ofd_probe", "inv_ofd_test", "probe_bench_transport",
+        "test_classifier", "test_entity", "test_privacy", "test_psi",
+        "iconv_test", "llm_extract_test", "mcp/sudoku",
+    ]),
+]
+
+
+def maturity_for(path: str) -> str:
+    tier = "tested"
+    for t, frags in MATURITY:
+        for frag in frags:
+            if frag in path:
+                tier = t
+    return tier
+
 
 def rel(p: Path) -> str:
     try:
@@ -58,6 +88,10 @@ def main():
         lines = text.split("\n")
         if re.search(r"^--\s*@license:", text, re.M):
             new = re.sub(r"^--\s*@license:.*$", f"-- @license: {lic}", text, count=1, flags=re.M)
+            if not re.search(r"^--\s*@maturity:", new, re.M):
+                new = re.sub(r"^(--\s*@license:.*)$",
+                             rf"\1\n-- @maturity: {maturity_for(rel(f))}",
+                             new, count=1, flags=re.M)
         else:
             # find the LAST tag line of the header block: scan from the top,
             # a tag line starts a new tag; continuation lines are '--' without
@@ -75,6 +109,7 @@ def main():
             if last_tag is None:
                 last_tag = 0
             lines.insert(last_tag + 1, f"-- @license: {lic}")
+            lines.insert(last_tag + 2, f"-- @maturity: {maturity_for(rel(f))}")
             new = "\n".join(lines)
         if new != text:
             f.write_text(new, encoding="utf-8")

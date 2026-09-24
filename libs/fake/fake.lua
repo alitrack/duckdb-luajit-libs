@@ -2,6 +2,7 @@
 -- @category: fake
 -- @desc: fakeit 风格假数据生成器（纯 Lua，自包含，零 FFI/零外部依赖）——标量占位符 +
 -- @license: MIT (duckdb-luajit-libs project)
+-- @maturity: tested
 --       模板 + 行级批量，seed 可复现。55 种 kind（person/contact/company/address/
 --       internet/finance/card/car/text(EN+CN)/date/time/number/color/bool/uuid）。
 --       双形态：

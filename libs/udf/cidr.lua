@@ -19,6 +19,7 @@
 -- @source: 自包含
 -- @requires: none
 -- @license: MIT (duckdb-luajit-libs project)
+-- @maturity: tested
 --
 -- Usage (duckdb-luajit):
 --   SELECT luajit_s('cidr', {op: 'in_cidr', v: '192.168.1.5', cidr: '192.168.0.0/16'});  -- true

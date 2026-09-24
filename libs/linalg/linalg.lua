@@ -11,6 +11,7 @@
 -- @source: original（duckdb-luajit 系列）
 -- @requires: 系统 OpenBLAS（含 LAPACK）：
 -- @license: MIT (duckdb-luajit-libs project)
+-- @maturity: audited
 --            Debian/Ubuntu: libopenblas-dev（通常已装）; macOS: brew install openblas;
 --            Windows: 下载 OpenBLAS Windows 预编译包（InsightfulScience/openblas-bin
 --            或 xianyi/OpenBLAS 的 OpenBLAS-0.3.x-x64-64.zip）解压，openblas.dll

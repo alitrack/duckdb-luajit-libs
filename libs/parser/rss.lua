@@ -17,6 +17,7 @@
 -- @source: 自包含（解析器源自本仓库 xml.lua）
 -- @requires: none
 -- @license: MIT (duckdb-luajit-libs project)
+-- @maturity: tested
 --
 -- Usage:
 --   SELECT luajit_s('rss', {op:'detect', v:'<rss version="2.0"><channel>...</channel></rss>'});  -- rss2

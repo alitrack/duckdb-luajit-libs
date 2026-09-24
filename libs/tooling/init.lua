@@ -2,6 +2,7 @@
 -- @category: tooling
 -- @desc: 仓库批量注册入口 —— 从 INDEX 一次性 dofile 全部（或指定）库并注册到全局表，
 -- @license: MIT (duckdb-luajit-libs project)
+-- @maturity: tested
 --       之后 luajit_s('jsonpath', doc, path) / luajit_s('cidr', ...) 直接可用，
 --       免逐库 quick_compile/install。离线可用（本地 INDEX，不拉远端）。
 --       参数（表形式）：

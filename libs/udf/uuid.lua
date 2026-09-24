@@ -4,6 +4,7 @@
 -- @source: original（duckdb-luajit 系列）
 -- @requires: LuaJIT bit 库
 -- @license: MIT (duckdb-luajit-libs project)
+-- @maturity: tested
 -- Usage (duckdb-luajit):
 --   install: SELECT * FROM luajit_module(mode:='install', sql_name:='uuid');
 --   call:    SELECT luajit_s('uuid', '');   -- → 550e8400-e29b-41d4-a716-446655440000

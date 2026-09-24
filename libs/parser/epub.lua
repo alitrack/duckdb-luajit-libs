@@ -15,6 +15,7 @@
 -- @source: 自包含（zip/inflate 逐字移植自 libs/parser/unzip.lua；XML 抽取参考 xml.lua 思路）
 -- @requires: zlib（Linux/macOS 内置；Windows zlib1.dll 入 PATH）。需普通模式（读文件）。
 -- @license: MIT (duckdb-luajit-libs project)
+-- @maturity: tested
 --
 -- Usage (duckdb-luajit):
 --   元数据:  SELECT luajit_s('epub', {file: '/x/book.epub', op: 'metadata'});

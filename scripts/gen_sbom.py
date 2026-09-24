@@ -62,6 +62,7 @@ def main():
             "license": h.get("license", "MIT (duckdb-luajit-libs project)"),
             "source": src or "original (duckdb-luajit series)",
             "requires": h.get("requires", "none"),
+            "maturity": h.get("maturity", "tested"),
             "kind": kind(src),
         })
 
@@ -95,10 +96,16 @@ def main():
         lines.append(f"| {n} | {l} | {note} |")
 
     lines += ["", "## Full inventory", "",
-              "| Lib | Category | Path | SHA-256 | License | Requires |",
-              "|---|---|---|---|---|---|"]
+              "| Lib | Category | Path | SHA-256 | License | Maturity | Requires |",
+              "|---|---|---|---|---|---|---|"]
     for r in rows:
-        lines.append(f"| `{r['name']}` | {r['category']} | `{r['path']}` | `{r['sha256'][:16]}…` | {r['license']} | {r['requires']} |")
+        lines.append(f"| `{r['name']}` | {r['category']} | `{r['path']}` | `{r['sha256'][:16]}…` | {r['license']} | {r['maturity']} | {r['requires']} |")
+
+    lines += ["", "## Maturity tiers", "",
+              "- `audited` — anchor-verified against known answers / third-party-reviewed",
+              "- `tested` — has a runnable test in this repo (default)",
+              "- `poc` — demo/probe script, not hardened",
+              ""]
 
     lines += ["", "## Embedded in the companion extension (duckdb-luajit)", "",
               f"- {EMBEDDED_NOTE}", "",

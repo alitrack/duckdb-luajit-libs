@@ -4,6 +4,7 @@
 -- @source: vendored https://github.com/rxi/json.lua (MIT, rxi 2020)
 -- @requires: none
 -- @license: MIT (vendored rxi/json.lua, rxi 2020)
+-- @maturity: audited
 --
 -- json.lua
 --

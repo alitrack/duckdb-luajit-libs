@@ -4,6 +4,7 @@
 -- @source: original（duckdb-luajit 系列）
 -- @requires: none
 -- @license: MIT (duckdb-luajit-libs project)
+-- @maturity: tested
 -- Usage (luajit_table, table mode): source returns function(list_str) → rows[]
 --   install: SELECT * FROM luajit_module(mode:='install', sql_name:='zip_list');
 --   call:    SELECT * FROM luajit_table('zip_list', list := '/path/a.zip');

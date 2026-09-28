@@ -7,6 +7,9 @@
 --       支持 whitespace-delimited 定长/空隔表（连续空白=分隔符，NOAA Keeling 曲线式，
 --       补 duckdb/duckdb#18413 读不了的格式）：4 种定长分隔符全 miss 时自动回退探测，
 --       或显式 delimit='whitespace' 强制。
+--       注释行：NOAA 式 # 注释头自动处理——首非空行以 '#' 开头时自动剥离重探
+--       （剥后探测不成立则保留原样，# 视为数据），成功则 detect 输出带 "comment":"#"
+--       且 parse 自动跳过注释行；也可显式 comment='#'（或 '//' 等任意首字符）强制剥离。
 --       op 选项（v = CSV 文本；或用 file = CSV 文件路径，库内 io.open 读取）：
 --         'detect' → 方言 JSON：{delimiter, quotechar, doublequote, skipinitialspace, has_header, ncols}
 --                    delimiter 取值 "," ";" "\t" "|" "whitespace" 或 "unknown"；quotechar 取 "\"" 或 "none"
@@ -84,15 +87,30 @@ local function parse_ws(s)
   return rows
 end
 
-local parse_csv  -- 前置声明（detect_dialect 在 parse_csv 定义之前调用它）
-local function detect_dialect(s)
-  -- 去掉首尾空白行
-  s = s:gsub('\r\n', '\n'):gsub('\n\n+$', '\n')
-  local lines = {}
+-- ============ 注释行过滤（NOAA 式 # 头，duckdb/duckdb#18413）============
+local function is_comment(l, ch)
+  local p = l:match('^%s*') or ''
+  return l:sub(#p + 1, #p + #ch) == ch
+end
+
+local function strip_comment_lines(s, ch)
+  local out = {}
   for l in (s .. '\n'):gmatch('(.-)\n') do
-    if l:gsub('^%s+',''):gsub('%s+$','') ~= '' then lines[#lines+1] = l end
+    if not is_comment(l, ch) then out[#out+1] = l end
   end
-  local nlines = #lines
+  return table.concat(out, '\n')
+end
+
+local function nonempty_lines(t)
+  local out = {}
+  for l in (t .. '\n'):gmatch('(.-)\n') do
+    if l:gsub('^%s+',''):gsub('%s+$','') ~= '' then out[#out+1] = l end
+  end
+  return out
+end
+
+-- 定长分隔符候选（,;|\t 优先级）：所有用到它的行计数一致才有效
+local function find_fixed_delim(s)
   local candidates = {',', ';', '\t', '|'}
   local best = nil; local best_score = -1
   for _, cand in ipairs(candidates) do
@@ -104,13 +122,24 @@ local function detect_dialect(s)
         if first == nil then first = c elseif c ~= first then all_eq = false end
       end
     end
-    -- 有效：至少 1 行用到，且用到的行计数一致
     if nonzero >= 1 and all_eq then
       local score = nonzero  -- 覆盖行数越多越可信；并列时先出现者胜（,;|\t 顺序）
       if score > best_score then best_score = score; best = cand end
     end
   end
-  local delimiter = best
+  return best
+end
+
+local parse_csv  -- 前置声明（detect_dialect 在 parse_csv 定义之前调用它）
+local function detect_once(s)
+  -- 去掉首尾空白行
+  s = s:gsub('\r\n', '\n'):gsub('\n\n+$', '\n')
+  local lines = {}
+  for l in (s .. '\n'):gmatch('(.-)\n') do
+    if l:gsub('^%s+',''):gsub('%s+$','') ~= '' then lines[#lines+1] = l end
+  end
+  local nlines = #lines
+  local delimiter = find_fixed_delim(s)
   -- whitespace 回退（duckdb/duckdb#18413）：定长分隔符全 miss 时，
   -- 所有行按连续空白切分列数一致且 >=2 → whitespace-delimited
   if not delimiter and nlines >= 2 then
@@ -177,6 +206,33 @@ local function detect_dialect(s)
     has_header = has_header,
     ncols = ncols,
   }
+end
+
+-- 外层入口：注释行处理（comment 参数；或自动 # 注释头剥离）。
+-- 自动规则：首非空行以 '#' 开头 → 视为注释头（NOAA 式文件惯例），优先采用
+-- 剥离后重探的结果（原始探测会被注释行自身的字符污染，如注释里的逗号）；
+-- 剥离后探测不成立 → 保留原始（# 视为数据）。
+local function detect_dialect(s, comment)
+  -- 显式注释符：剥后重探
+  if comment and comment ~= 'none' and comment ~= '' then
+    local d = detect_once(strip_comment_lines(s, comment))
+    if d.delimiter ~= 'unknown' then d.comment = comment; return d end
+  end
+  local d = detect_once(s)
+  if not comment then
+    local first_line = nil
+    for l in (s .. '\n'):gmatch('(.-)\n') do
+      if l:gsub('^%s+',''):gsub('%s+$','') ~= '' then first_line = l; break end
+    end
+    if first_line and is_comment(first_line, '#') then
+      local d2 = detect_once(strip_comment_lines(s, '#'))
+      if d2.delimiter ~= 'unknown' then
+        d2.comment = '#'
+        return d2
+      end
+    end
+  end
+  return d
 end
 
 -- ============ 纯 Lua CSV 解析（状态机）============
@@ -273,7 +329,11 @@ return function(p)
   if not v or v == '' then return '{"error":"missing v or file"}' end
   local op = p.op or 'detect'
 
-  local dialect = detect_dialect(v)
+  local dialect = detect_dialect(v, p.comment)
+  -- 探测采纳了注释剥离（显式 comment 或自动 # 回退）→ 解析前先剥
+  if dialect.comment and dialect.comment ~= '' then
+    v = strip_comment_lines(v, dialect.comment)
+  end
   local delim = p.delimit or dialect.delimiter
   local quote = p.quote and p.quote ~= 'none' and p.quote or (dialect.quotechar ~= 'none' and dialect.quotechar or nil)
   local rows

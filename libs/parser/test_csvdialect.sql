@@ -88,3 +88,41 @@ SELECT cd({v: 'a  b  c
 -- 12. 非空白表格不受影响（单列文本不触发 whitespace）
 SELECT json_extract(cd({v: 'hello world
 foo bar baz', op:'detect'}), '$.delimiter') AS d12;   -- "unknown"（列数不一致）
+
+-- 13. # 注释头 + whitespace 数据（NOAA 原始文件式：注释行破坏列一致性 → 自动剥 # 后回退 whitespace）
+SELECT json_extract(cd({v:
+'# ---- NOAA GML DATA
+# Monthly CO2, Mauna Loa
+Year  Month  Average
+1958  1.0  315.71
+1958  2.0  317.02', op:'detect'}), '$.delimiter')  AS d13,  -- "whitespace"
+       json_extract(cd({v:
+'# ---- NOAA GML DATA
+# Monthly CO2, Mauna Loa
+Year  Month  Average
+1958  1.0  315.71
+1958  2.0  317.02', op:'detect'}), '$.comment')    AS c13,  -- "#"
+       cd({v:
+'# ---- NOAA GML DATA
+# Monthly CO2, Mauna Loa
+Year  Month  Average
+1958  1.0  315.71
+1958  2.0  317.02', op:'rows'})                    AS r13;  -- 3（注释行不计）
+
+-- 14. # 注释头 + 逗号 CSV（自动剥 #）
+SELECT cd({v:
+'# comment line
+name,age
+Alice,30
+Bob,25', op:'parse'}) AS p14;   -- [["name","age"],["Alice","30"],["Bob","25"]]
+
+-- 15. 显式 comment 参数（// 注释，逗号 CSV）
+SELECT cd({v:
+'// comment
+x,y
+1,2', comment:'//', op:'parse'}) AS p15;   -- [["x","y"],["1","2"]]
+
+-- 16. 数据里含 # 行但定长探测已成立 → 不自动剥（# 视为数据）
+SELECT json_extract(cd({v: 'a,b
+#1,2
+3,4', op:'detect'}), '$.comment') AS c16;   -- null（无 comment 字段）

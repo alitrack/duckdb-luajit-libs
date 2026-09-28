@@ -16,6 +16,11 @@
 --         SELECT * FROM luajit_table('csvdialect', list := '{"url":"...","delimit":"...","comment":"#","skip_header":true}');
 --       输出 row_idx|val，val = 该记录字段管道拼接串（字段内 | 转义为 ¦、换行转 \n），
 --       用 split_part(val,'|',N) 取第 N 列；表函数源只认 path/URL，inline 文本走标量形态。
+--       **read_csv_dialect 式一行**（table macro 封装，真名可用；v1.x 内置同名函数会被遮蔽，
+--       按需在别名上建）：
+--         CREATE OR REPLACE MACRO read_csv_dialect(src) AS TABLE
+--           SELECT * FROM luajit_table('csvdialect', list := src);
+--         SELECT * FROM read_csv_dialect('https://gml.noaa.gov/.../co2_mm_mlo.txt');
 --       op 选项（标量形态；v = CSV 文本；file = 本地路径；url = http(s) 地址）：
 --         'detect' → 方言 JSON：{delimiter, quotechar, doublequote, skipinitialspace, has_header, ncols}
 --                    delimiter 取值 "," ";" "\t" "|" "whitespace" 或 "unknown"；quotechar 取 "\"" 或 "none"

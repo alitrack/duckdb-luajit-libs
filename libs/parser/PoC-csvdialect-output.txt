@@ -1,6 +1,6 @@
 ==============================================================
  PoC — duckdb-luajit lib: csvdialect
- 生成时间: 2026-09-28T08:49:44Z
+ 生成时间: 2026-09-28T09:08:40Z
  DuckDB:   v2.0.0-alpha39998 (Cyanoptera) a00803f768
  命令:     duckdb -unsigned -f libs/parser/test_csvdialect.sql
 ==============================================================
@@ -137,6 +137,17 @@
 ├────────────────────────────────────┤
 │ ERR: cannot open /nonexistent/path │
 └────────────────────────────────────┘
+[90mWARNING:
+[00m[90mDeprecated implicit conversion of unbound identifiers to strings in table function arguments detected. Please use a string literal instead, e.g. '0_macro_parametersread_csv_dialect.src'.
+Use SET table_function_identifier_conversion='ENABLE_IMPLICIT_STRING' to revert to the deprecated behavior.
+
+[00m┌─────────┬─────────┐
+│ row_idx │   val   │
+│  int64  │ varchar │
+├─────────┼─────────┤
+│       1 │ a|b|c   │
+│       2 │ 1|2|3   │
+└─────────┴─────────┘
 
 交叉校验 (csvdialect_verify.py, Python csv oracle):
 === PASS=10 FAIL=0 TOTAL=10 ===

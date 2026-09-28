@@ -135,3 +135,10 @@ SELECT COUNT(*) AS n18 FROM luajit_table('cd', list := '/mnt/d/wsl2/tmp/co2_mm_m
 SELECT COUNT(*) AS n19 FROM luajit_table('cd', list := '{"file": "/mnt/d/wsl2/tmp/co2_mm_mlo.txt", "skip_header": true}');   -- 821（NOAA 文件无表头行，822-1）
 -- 20. 表函数错误可见（ERR 行而非静默 0 行）
 SELECT val FROM luajit_table('cd', list := '{"file": "/nonexistent/path"}');   -- ERR: ...
+
+-- 21. read_csv_dialect 式一行封装（table macro，真名可用；v2.0 无内置 read_csv_dialect，
+--     v1.x 有内置同名函数，本宏会遮蔽它——按需在别名上创建）
+-- SET table_function_identifier_conversion = 'ENABLE_IMPLICIT_STRING';  -- 老版传参行为，免 deprecation 警告
+CREATE OR REPLACE MACRO read_csv_dialect(src) AS TABLE
+  SELECT * FROM luajit_table('cd', list := src);
+SELECT * FROM read_csv_dialect('/mnt/d/wsl2/tmp/csvd_ws_fixture.txt') LIMIT 2;   -- 1|a|b|c  2|1|2|3

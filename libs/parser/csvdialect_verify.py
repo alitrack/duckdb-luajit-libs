@@ -23,8 +23,20 @@ def freq_delim(text):
                 bestn = len(nz); best = cand
     return best
 
+def ws_delim(text):
+    # whitespace 回退（duckdb/duckdb#18413）：定长分隔符全 miss 时，
+    # 所有非空行按连续空白切分列数一致且 >=2 → 'whitespace'
+    lines = [l for l in text.split('\n') if l.strip()]
+    if len(lines) < 2:
+        return None
+    cols = [len(l.split()) for l in lines]
+    if cols[0] >= 2 and all(c == cols[0] for c in cols):
+        return 'whitespace'
+    return None
+
 def oracle_delim(text):
-    # 先用 Sniffer；若 Sniffer 的选择不产生一致多列切分，退回列一致性规则
+    # 先用 Sniffer；若 Sniffer 的选择不产生一致多列切分，退回列一致性规则；
+    # 再退回 whitespace 探测
     try:
         sn = csv.Sniffer().sniff(text, delimiters=',;\t|')
         d = sn.delimiter
@@ -33,7 +45,7 @@ def oracle_delim(text):
             return d
     except Exception:
         pass
-    return freq_delim(text) or ','
+    return freq_delim(text) or ws_delim(text) or ','
 
 CASES = [
     # (csv_text, has_header_expected) — oracle 用 csv.Sniffer + csv.reader
@@ -45,6 +57,12 @@ CASES = [
     ("x,y\n1,2\n3,4\n", True),
     ("a;b;c\n1;2;3\n4;5;6\n", False),
     ('col1,col2\n"multi\nline",v\n', True),
+    # whitespace-delimited（duckdb/duckdb#18413：NOAA Keeling 曲线式）
+    ("Year  Month  Decimal   Average\n"
+     "1958  1.0  0.042   315.71\n"
+     "1958  2.0  0.083   317.02\n"
+     "1958  3.0  0.125   317.88\n", True),
+    ("a\tb c   d\n1 2   3\n4 5   6\n", False),  # tab+空格混合
 ]
 
 def sq(s):
@@ -69,10 +87,13 @@ for i, (text, _hexp) in enumerate(CASES):
     want_delim = oracle_delim(text)
     want_quote = '"'
     # --- oracle: parse matrix（用探测出的分隔符）---
-    try:
-        want_rows = list(csv.reader(io.StringIO(text), delimiter=want_delim, quotechar=want_quote))
-    except Exception:
-        want_rows = None
+    if want_delim == 'whitespace':
+        want_rows = [[f for f in l.split()] for l in text.split('\n') if l.strip()]
+    else:
+        try:
+            want_rows = list(csv.reader(io.StringIO(text), delimiter=want_delim, quotechar=want_quote))
+        except Exception:
+            want_rows = None
 
     # --- lua ---
     got_dia_raw = run_elf(text, 'detect')

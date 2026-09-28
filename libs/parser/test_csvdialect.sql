@@ -52,3 +52,39 @@ SELECT json_extract(cd({v:'1,2,3
 -- 8. 空 / 错误
 SELECT cd({v:'', op:'detect'})  AS e1,   -- error: missing v or file
        cd({op:'detect'})          AS e2;   -- error: missing v or file
+
+-- 9. whitespace-delimited（duckdb/duckdb#18413：NOAA Keeling 曲线式，定长分隔符全 miss → 自动回退）
+SELECT json_extract(cd({v:
+'Year  Month  Decimal   Average
+1958  1.0  0.042   315.71
+1958  2.0  0.083   317.02
+1958  3.0  0.125   317.88', op:'detect'}), '$.delimiter')  AS d9,  -- "whitespace"
+       json_extract(cd({v:
+'Year  Month  Decimal   Average
+1958  1.0  0.042   315.71
+1958  2.0  0.083   317.02
+1958  3.0  0.125   317.88', op:'detect'}), '$.ncols')      AS n9,  -- 4
+       json_extract(cd({v:
+'Year  Month  Decimal   Average
+1958  1.0  0.042   315.71
+1958  2.0  0.083   317.02
+1958  3.0  0.125   317.88', op:'detect'}), '$.has_header') AS h9;  -- true
+
+-- 10. whitespace parse（含 tab 混合空白 + 显式 delimit='whitespace'）
+SELECT cd({v: 'Year  Month  Average
+1958  1.0  315.71
+1958  2.0  317.02', op:'parse'}) AS p10;   -- [["Year","Month","Average"],["1958","1.0","315.71"],["1958","2.0","317.02"]]
+SELECT cd({v: 'a b
+1 2', delimit:'whitespace', op:'parse'}) AS p11;   -- [["a","b"],["1","2"]]
+
+-- 11. whitespace rows / ncols
+SELECT cd({v: 'a  b  c
+1  2  3
+4  5  6', op:'rows'})  AS r11,   -- 3
+       cd({v: 'a  b  c
+1  2  3
+4  5  6', op:'ncols'}) AS c11;   -- "rect"
+
+-- 12. 非空白表格不受影响（单列文本不触发 whitespace）
+SELECT json_extract(cd({v: 'hello world
+foo bar baz', op:'detect'}), '$.delimiter') AS d12;   -- "unknown"（列数不一致）

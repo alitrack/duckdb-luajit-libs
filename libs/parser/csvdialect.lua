@@ -4,9 +4,12 @@
 -- @license: MIT (duckdb-luajit-libs project)
 -- @maturity: tested
 --       多行/引号内嵌分隔符/欧洲分号格式常误判，本库用确定性状态机做「探测方言 + 精确解析」。
+--       支持 whitespace-delimited 定长/空隔表（连续空白=分隔符，NOAA Keeling 曲线式，
+--       补 duckdb/duckdb#18413 读不了的格式）：4 种定长分隔符全 miss 时自动回退探测，
+--       或显式 delimit='whitespace' 强制。
 --       op 选项（v = CSV 文本；或用 file = CSV 文件路径，库内 io.open 读取）：
 --         'detect' → 方言 JSON：{delimiter, quotechar, doublequote, skipinitialspace, has_header, ncols}
---                    delimiter 取值 "," ";" "\t" "|" 或 "unknown"；quotechar 取 "\"" 或 "none"
+--                    delimiter 取值 "," ";" "\t" "|" "whitespace" 或 "unknown"；quotechar 取 "\"" 或 "none"
 --                    has_header = 启发式（首行多为非数字文本 且 后续行含数字 → true）
 --         'parse'  → 解析后的二维数组 JSON（[[f1,f2..],[..]]），用探测出的方言（可 delimit/quote 覆盖）
 --         'rows'   → 行数（数字）
@@ -54,6 +57,33 @@ local function count_per_line(s, delim)
   return counts
 end
 
+-- ============ whitespace 解析（duckdb/duckdb#18413：连续空白=分隔符）============
+local function split_ws_line(l)
+  local fields = {}
+  for f in l:gmatch('%S+') do fields[#fields+1] = f end
+  return fields
+end
+
+local function detect_whitespace(lines)
+  -- 所有非空行按空白切分后列数一致且 >=2 → whitespace-delimited
+  local first = #split_ws_line(lines[1])
+  if first < 2 then return false, 0 end
+  for i = 2, #lines do
+    if #split_ws_line(lines[i]) ~= first then return false, 0 end
+  end
+  return true, first
+end
+
+local function parse_ws(s)
+  s = s:gsub('\r\n', '\n'):gsub('\r', '\n')
+  local rows = {}
+  for l in (s .. '\n'):gmatch('(.-)\n') do
+    local trimmed = l:gsub('^%s+', ''):gsub('%s+$', '')
+    if trimmed ~= '' then rows[#rows+1] = split_ws_line(trimmed) end
+  end
+  return rows
+end
+
 local parse_csv  -- 前置声明（detect_dialect 在 parse_csv 定义之前调用它）
 local function detect_dialect(s)
   -- 去掉首尾空白行
@@ -64,7 +94,7 @@ local function detect_dialect(s)
   end
   local nlines = #lines
   local candidates = {',', ';', '\t', '|'}
-  local best = nil; best_score = -1
+  local best = nil; local best_score = -1
   for _, cand in ipairs(candidates) do
     local counts = count_per_line(s, cand)
     local nonzero = 0; local first = nil; local all_eq = true
@@ -80,32 +110,48 @@ local function detect_dialect(s)
       if score > best_score then best_score = score; best = cand end
     end
   end
-  local delimiter = best or 'unknown'
+  local delimiter = best
+  -- whitespace 回退（duckdb/duckdb#18413）：定长分隔符全 miss 时，
+  -- 所有行按连续空白切分列数一致且 >=2 → whitespace-delimited
+  if not delimiter and nlines >= 2 then
+    local ws_ok, ws_nc = detect_whitespace(lines)
+    if ws_ok then delimiter = 'whitespace' end
+  end
+  if not delimiter then delimiter = 'unknown' end
 
   -- quotechar
   local quotechar = 'none'
   if s:find('"') then quotechar = '"' end
   -- doublequote
   local doublequote = s:find('""') ~= nil
-  -- skipinitialspace: 分隔符后紧跟空格（引号外，plain find 即可）
+  -- skipinitialspace: 分隔符后紧跟空格（引号外，plain find 即可；whitespace 无此概念）
   local skipinitialspace = false
-  if delimiter ~= 'unknown' then
+  if delimiter ~= 'unknown' and delimiter ~= 'whitespace' then
     skipinitialspace = s:find(delimiter .. ' ', 1, true) ~= nil
   end
   -- ncols: 用探测出的分隔符切第一行（引号外）
   local ncols = 0
-  if nlines >= 1 and delimiter ~= 'unknown' then
-    local first = lines[1]
-    local inq = false; local c = 0
-    for i = 1, #first - (#delimiter - 1) do
-      if first:sub(i,i) == '"' then inq = not inq
-      elseif first:sub(i, i+#delimiter-1) == delimiter and not inq then c = c + 1 end
+  if nlines >= 1 then
+    if delimiter == 'whitespace' then
+      ncols = #split_ws_line(lines[1])
+    elseif delimiter ~= 'unknown' then
+      local first = lines[1]
+      local inq = false; local c = 0
+      for i = 1, #first - (#delimiter - 1) do
+        if first:sub(i,i) == '"' then inq = not inq
+        elseif first:sub(i, i+#delimiter-1) == delimiter and not inq then c = c + 1 end
+      end
+      ncols = c + 1
     end
-    ncols = c + 1
   end
 
   -- has_header 启发式：解析后判断（首行全为非数字文本 且 第二行含数字 → true）
-  local rows = parse_csv(s, delimiter ~= 'unknown' and delimiter or ',', quotechar ~= 'none' and quotechar or nil)
+  local rows
+  if delimiter == 'whitespace' then
+    rows = parse_ws(s)
+  else
+    rows = parse_csv(s, delimiter ~= 'unknown' and delimiter or ',', quotechar ~= 'none' and quotechar or nil)
+  end
   local has_header = false
   local function is_num(f)
     return f:gsub('^%s+',''):gsub('%s+$',''):match('^%-?%d+%.?%d*$') ~= nil
@@ -230,7 +276,12 @@ return function(p)
   local dialect = detect_dialect(v)
   local delim = p.delimit or dialect.delimiter
   local quote = p.quote and p.quote ~= 'none' and p.quote or (dialect.quotechar ~= 'none' and dialect.quotechar or nil)
-  local rows = parse_csv(v, delim ~= 'unknown' and delim or ',', quote)
+  local rows
+  if delim == 'whitespace' then
+    rows = parse_ws(v)
+  else
+    rows = parse_csv(v, delim ~= 'unknown' and delim or ',', quote)
+  end
 
   if op == 'detect' then
     return json_encode(dialect)

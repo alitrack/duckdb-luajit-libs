@@ -10,7 +10,13 @@
 --       注释行：NOAA 式 # 注释头自动处理——首非空行以 '#' 开头时自动剥离重探
 --       （剥后探测不成立则保留原样，# 视为数据），成功则 detect 输出带 "comment":"#"
 --       且 parse 自动跳过注释行；也可显式 comment='#'（或 '//' 等任意首字符）强制剥离。
---       op 选项（v = CSV 文本；或用 file = CSV 文件路径，库内 io.open 读取）：
+--       **表函数形态**（read_csv_dialect 式一行直读，含 http(s) URL，FFI 优先/curl 回退）：
+--         SELECT * FROM luajit_table('csvdialect', list := 'https://gml.noaa.gov/.../co2_mm_mlo.txt');
+--         SELECT * FROM luajit_table('csvdialect', list := '/path/to/file');
+--         SELECT * FROM luajit_table('csvdialect', list := '{"url":"...","delimit":"...","comment":"#","skip_header":true}');
+--       输出 row_idx|val，val = 该记录字段管道拼接串（字段内 | 转义为 ¦、换行转 \n），
+--       用 split_part(val,'|',N) 取第 N 列；表函数源只认 path/URL，inline 文本走标量形态。
+--       op 选项（标量形态；v = CSV 文本；file = 本地路径；url = http(s) 地址）：
 --         'detect' → 方言 JSON：{delimiter, quotechar, doublequote, skipinitialspace, has_header, ncols}
 --                    delimiter 取值 "," ";" "\t" "|" "whitespace" 或 "unknown"；quotechar 取 "\"" 或 "none"
 --                    has_header = 启发式（首行多为非数字文本 且 后续行含数字 → true）
@@ -20,13 +26,77 @@
 --       验证：libs/parser/csvdialect_verify.py（Python csv.Sniffer + csv.reader 交叉校验
 --       delimiter/quotechar 与解析后的字段矩阵）。
 
+-- ============ HTTP 取数（FFI 优先，curl CLI 回退；复用 jev_ask 的传输层模式）============
+local IS_WINDOWS = (os.getenv('PROCESSOR_ARCHITECTURE') ~= nil or os.getenv('COMPUTERNAME') ~= nil)
+local function sq(s)
+  if IS_WINDOWS then return '"' .. s .. '"' end
+  return "'" .. s .. "'"
+end
+local NOPROXY_STAR = IS_WINDOWS and '*' or "'*'"
+
+local function fetch_source(url)
+  local res, ferr
+  local ffi_post = _G._curl_ffi_post
+  if ffi_post then
+    res, ferr = ffi_post({ url = url, timeout = 120 })
+    if not res then ferr = tostring(ferr or 'curl_ffi transport failed'):sub(8) end
+  end
+  if not res then
+    -- -w 参数必须 shell 引用（sq 包单/双引号），curl 自己解释格式里的 \n 换行；
+    -- 裸 \n 会被 shell 当转义吃掉 → curl 不输出换行 → 状态码正则匹配失败。
+    -- （与 jev_ask.lua 的 http_post 同款拼法，勿"简化"。）
+    local warg = sq('\\n%{http_code}')
+    local pipe = io.popen(string.format(
+      'curl -s --noproxy %s --max-time 120 -w %s %s',
+      NOPROXY_STAR, warg, sq(url)))
+    if pipe then
+      local out = pipe:read('*a'); pipe:close()
+      if out then
+        local code = out:match('\n(%d+)$')
+        local payload = out:match('^(.*)\n%d+$') or out
+        if code and tonumber(code) >= 200 and tonumber(code) < 300 then
+          res = payload
+        else
+          ferr = string.format('HTTP %s from %s: %s',
+            tostring(code), url, payload:sub(1, 200))
+        end
+      else
+        ferr = 'no response from ' .. url
+      end
+    else
+      ferr = 'io.popen failed (needs normal mode) fetching ' .. url
+    end
+  end
+  if not res then return nil, ferr or 'http fetch failed for ' .. tostring(url) end
+  return res
+end
+
 local function read_input(p)
+  -- 本地文件
   local v = p.v
   if (not v or v == '') and p.file and p.file ~= '' then
     local f = io.open(p.file, 'r')
     if not f then return nil, 'cannot open '..tostring(p.file) end
     v = f:read('*a'); f:close()
   end
+  -- HTTP(S) URL（FFI 优先，curl CLI 回退；复用 jev_ask 的传输层模式）
+  if (not v or v == '') and p.url and p.url ~= '' then
+    local res, ferr
+    v, ferr = fetch_source(p.url)
+    if not v then return nil, ferr or 'http fetch failed for ' .. tostring(p.url) end
+  end
+  return v
+end
+
+-- 表函数用：按路径/URL 取数（不经过 p.v，避免 table 函数误把 list 当 v）
+local function read_source(path)
+  if not path or path == '' then return nil, 'no source' end
+  if path:match('^https?://') then
+    return fetch_source(path)
+  end
+  local f = io.open(path, 'r')
+  if not f then return nil, 'cannot open '..tostring(path) end
+  local v = f:read('*a'); f:close()
   return v
 end
 
@@ -322,8 +392,75 @@ end
 json_encode = encode
 
 -- ============ 入口 ============
+-- 双形态：
+--  (1) 标量：luajit_s('csvdialect', {op:.., v:/file:/url:..}) → JSON（detect/parse/rows/ncols）
+--  (2) 表函数：luajit_table('csvdialect', list := '<path|URL>' | '<json spec>')
+--      → 每数据行 1 个管道拼接串（字段内的 | 与换行按约定转义），read_csv_dialect 式直读：
+--        SELECT * FROM luajit_table('csvdialect', list := 'https://gml.noaa.gov/.../co2_mm_mlo.txt');
+--      list 为裸路径/URL，或 JSON spec {"url":..,"delimit":..,"comment":..,"skip_header":true}
+local function pipe_escape(s)
+  s = tostring(s)
+  return (s:gsub('|', '¦'):gsub('\n', '\\n'):gsub('\r', ''))
+end
+
+-- 极简 spec 提取（自含，避免 dofile 别的库）：从 JSON 串里抠出我们认的键。
+-- ⚠️ Lua pattern 无 `|` 交替，布尔值用 `([%a]+)` 捕获单词再比较（勿写 (true|false)）。
+local function spec_get(spec, key)
+  local pat = string.format('"%s"[ ]*:[ ]*"([^"]*)"', key)
+  local val = spec:match(pat)
+  if val then return val end
+  local b = spec:match(string.format('"%s"[ ]*:[ ]*(%%a+)', key))
+  if b == 'true' then return true end
+  if b == 'false' then return false end
+  return nil
+end
+
+local function run_table(list)
+  -- 取 source + 可选 spec
+  local spec, path
+  if list:match('^%s*%{') then
+    spec = list
+    path = spec_get(spec, 'url') or spec_get(spec, 'file')
+  else
+    path = list:gsub('^%s+', ''):gsub('%s+$', '')
+  end
+  if not path or path == '' then
+    return { 'ERR: list must be a path/URL or a json spec with url/file' }
+  end
+  local v, ferr = read_source(path)
+  if not v or v == '' then return { 'ERR: ' .. tostring(ferr) } end
+
+  local delimit  = spec and spec_get(spec, 'delimit')
+  local comment  = spec and spec_get(spec, 'comment')
+  local skiphdr  = spec and spec_get(spec, 'skip_header')
+  local dialect = detect_dialect(v, comment)
+  if dialect.comment and dialect.comment ~= '' then
+    v = strip_comment_lines(v, dialect.comment)
+  end
+  local delim = delimit or dialect.delimiter
+  local quote = (spec and spec_get(spec, 'quote'))
+  if quote == 'none' then quote = nil end
+  if not quote then
+    quote = (dialect.quotechar ~= 'none') and dialect.quotechar or nil
+  end
+  local rows
+  if delim == 'whitespace' then rows = parse_ws(v)
+  else rows = parse_csv(v, (delim ~= 'unknown' and delim or ','), quote) end
+
+  if skiphdr == true and #rows >= 1 then table.remove(rows, 1) end
+
+  local out = {}
+  for _, r in ipairs(rows) do
+    local parts = {}
+    for _, f in ipairs(r) do parts[#parts+1] = pipe_escape(f) end
+    out[#out+1] = table.concat(parts, '|')
+  end
+  if #out == 0 then out[#out+1] = 'ERR: 0 rows parsed (path wrong / empty / unsupported layout)' end
+  return out
+end
+
 return function(p)
-  if type(p) == 'string' then p = {v = p} end
+  if type(p) == 'string' then return run_table(p) end
   if type(p) ~= 'table' then return '{"error":"bad input"}' end
   local v, err = read_input(p)
   if not v or v == '' then return '{"error":"missing v or file"}' end

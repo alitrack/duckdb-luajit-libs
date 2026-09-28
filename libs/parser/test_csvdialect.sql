@@ -126,3 +126,12 @@ x,y
 SELECT json_extract(cd({v: 'a,b
 #1,2
 3,4', op:'detect'}), '$.comment') AS c16;   -- null（无 comment 字段）
+
+-- 17. 表函数形态：luajit_table（row_idx|val，val=管道拼接行；表函数源=path/URL，inline 文本走标量形态）
+SELECT * FROM luajit_table('cd', list := '/mnt/d/wsl2/tmp/csvd_ws_fixture.txt') LIMIT 2;   -- 1|a|b|c  2|1|2|3
+-- 18. 表函数 + 本地文件（NOAA 式注释自动剥）
+SELECT COUNT(*) AS n18 FROM luajit_table('cd', list := '/mnt/d/wsl2/tmp/co2_mm_mlo.txt');   -- 822
+-- 19. 表函数 + JSON spec（skip_header=true 去掉首行）
+SELECT COUNT(*) AS n19 FROM luajit_table('cd', list := '{"file": "/mnt/d/wsl2/tmp/co2_mm_mlo.txt", "skip_header": true}');   -- 821（NOAA 文件无表头行，822-1）
+-- 20. 表函数错误可见（ERR 行而非静默 0 行）
+SELECT val FROM luajit_table('cd', list := '{"file": "/nonexistent/path"}');   -- ERR: ...

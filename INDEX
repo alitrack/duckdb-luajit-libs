@@ -49,3 +49,4 @@ jev_ask|libs/udf/jev_ask.lua
 curl_ffi|libs/udf/curl_ffi.lua
 fake|libs/fake/fake.lua
 classifier|libs/ml/classifier.lua
+ssel|libs/ml/ssel.lua

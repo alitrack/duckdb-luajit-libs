@@ -57,8 +57,9 @@ local function is_hanchar(cp)
   if (cp >= 0x30 and cp <= 0x39) then return true end  -- 0-9
   if (cp >= 0x41 and cp <= 0x5A) then return true end  -- A-Z
   if (cp >= 0x61 and cp <= 0x7A) then return true end  -- a-z
+  -- # + & . _ % -   (explicit; a Lua char class mishandles the literal %)
   local c = string.char(cp)
-  return c:match('[%+#&._%-]') ~= nil
+  return c == '#' or c == '+' or c == '&' or c == '.' or c == '_' or c == '%' or c == '-'
 end
 
 local function build(d)
@@ -131,6 +132,43 @@ local function build(d)
     end
     return out
   end
+  -- finalseg.cut(buf): faithful port of jieba.finalseg.cut
+  --   CJK run (一-鿕) → BMES viterbi; non-CJK run → re_skip=[a-zA-Z0-9]+(?:\.\d+)?%?
+  --   (alnum run + optional ".digits" + optional "%" kept whole; all else per-char)
+  local function finalseg_cut(buf)
+    local codes = to_codes(buf)
+    local n = #codes
+    local function is_alnum(x) return (x>=0x30 and x<=0x39) or (x>=0x41 and x<=0x5A) or (x>=0x61 and x<=0x7A) end
+    local o2 = {}
+    local i = 1
+    while i <= n do
+      if is_cjk(codes[i]) then
+        local j = i
+        while j <= n and is_cjk(codes[j]) do j = j + 1 end
+        local run = {}
+        for k = i, j-1 do run[#run+1] = cp_to_utf8(codes[k]) end
+        for _, w in ipairs(hmm_cut(run)) do o2[#o2+1] = w end
+        i = j
+      elseif is_alnum(codes[i]) then
+        local si = i
+        while i <= n and is_alnum(codes[i]) do i = i + 1 end
+        -- optional .digits
+        if i <= n and codes[i] == 0x2E and i+1 <= n and codes[i+1]>=0x30 and codes[i+1]<=0x39 then
+          i = i + 1
+          while i <= n and codes[i]>=0x30 and codes[i]<=0x39 do i = i + 1 end
+        end
+        -- optional %
+        if i <= n and codes[i] == 0x25 then i = i + 1 end
+        local seg = {}
+        for k = si, i-1 do seg[#seg+1] = cp_to_utf8(codes[k]) end
+        o2[#o2+1] = table.concat(seg)
+      else
+        o2[#o2+1] = cp_to_utf8(codes[i])
+        i = i + 1
+      end
+    end
+    return o2
+  end
   -- get_DAG over chars (CJK run) → DAG[i] = list of end idx j (1-based, inclusive)
   local function get_dag(chars)
     local N = #chars
@@ -172,14 +210,8 @@ local function build(d)
       if #buf == 0 then return end
       if #buf == 1 then out[#out+1] = buf
       elseif WORDS[buf] == nil then
-        local bc = {}
-        local j = 1
-        while j <= #buf do
-          local b = buf:byte(j); local l
-          if b < 0x80 then l = 1 elseif b < 0xE0 then l = 2 elseif b < 0xF0 then l = 3 else l = 4 end
-          bc[#bc+1] = buf:sub(j, j+l-1); j = j + l
-        end
-        for _, w in ipairs(hmm_cut(bc)) do out[#out+1] = w end
+        -- not a real word → jieba 0.42.1 delegates to finalseg.cut
+        for _, w in ipairs(finalseg_cut(buf)) do out[#out+1] = w end
       else
         local bc = {}
         local j = 1

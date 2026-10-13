@@ -27,7 +27,7 @@ Works with [duckdb-luajit](https://github.com/alitrack/duckdb-luajit). Formats D
 | `libs/ffi/` | **FFI bindings** — system C libraries (dcmtk/open62541…) / compiled solvers | sudoku (C/Rust solver, ~7× faster than Lua reference, [libs/ffi/sudoku](libs/ffi/sudoku/README.md)) |
 | `libs/mcp/` | **MCP integration** — DuckDB as MCP server exposing Lua UDFs as tools to AI assistants | mcp-server (sudoku_solve demo) |
 | `libs/quality/` | **Data quality** — distribution/drift detection | psi (PSI/KL/chi2, profiling+drift) |
-| `libs/ml/` | **Machine learning** — local training/inference via Rust cdylib + FFI | classifier (TF-IDF + softmax head + temperature calibration + Clopper-Pearson threshold) |
+| `libs/ml/` | **Machine learning** — local training/inference via Rust cdylib + FFI | classifier (TF-IDF + softmax head + temperature calibration + Clopper-Pearson threshold), rsi_scorer (execution-feature scoring selector, RSI-Anything world-model low-fi port: score/select candidates by trial-run features + perceptron weight adaptation), ssel (learned-sparse semantic search) |
 | `libs/entity/` | **Entity resolution** — record linkage pipeline | entity (blocking+scoring+connected-component clustering) |
 | `libs/security/` | **Security** — policy and audit primitives | rbac (Quack RBAC policy engine), audit_chain (tamper-evident hash-chained audit log) |
 | `libs/privacy/` | **Privacy engineering** — differential privacy/masking/k-anonymity/clinical date shifting/de-identification assessment/free-text PHI redaction/credential redaction/reversible restore | privacy (dp_count/dp_sum/dp_mean, dp_compose/dp_alloc/dp_budget, mask, mask_cn, dateshift, redact_text, redact_secrets, restore_text, kanon, kanon_report) |

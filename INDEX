@@ -55,3 +55,4 @@ ltree|libs/udf/ltree.lua
 pgcrypto|libs/udf/pgcrypto.lua
 rsi_scorer|libs/ml/rsi_scorer.lua
 jieba|libs/udf/jieba.lua
+pgrouting|libs/udf/pgrouting.lua

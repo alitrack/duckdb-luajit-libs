@@ -220,18 +220,18 @@ local function build(d)
         for _, w in ipairs(cut_dag(run)) do tokens[#tokens+1] = w end
         i = j
       else
-        -- non-han separator: whitespace run grouped, else per-char (cut_all=false)
+        -- non-han block: jieba re_skip=(\r\n|\s) → each char its own token
+        -- (whitespace per char, CRLF pair merged); non-ws per char (cut_all=false)
         local j = i
         while j <= n and not is_hanchar(codes[j]) do j = j + 1 end
         local k = i
         while k < j do
-          local c = string.char(codes[k])
-          if c:match('[%s]') then
-            local run = c; k = k + 1
-            while k < j and string.char(codes[k]):match('[%s]') do run = run .. string.char(codes[k]); k = k + 1 end
-            tokens[#tokens+1] = run
+          if codes[k] == 0x0D and k + 1 < j and codes[k+1] == 0x0A then
+            tokens[#tokens+1] = cp_to_utf8(0x0D) .. cp_to_utf8(0x0A)
+            k = k + 2
           else
-            tokens[#tokens+1] = c; k = k + 1
+            tokens[#tokens+1] = cp_to_utf8(codes[k])
+            k = k + 1
           end
         end
         i = j

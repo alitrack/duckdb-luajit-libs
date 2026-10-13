@@ -50,3 +50,6 @@ curl_ffi|libs/udf/curl_ffi.lua
 fake|libs/fake/fake.lua
 classifier|libs/ml/classifier.lua
 ssel|libs/ml/ssel.lua
+trgm|libs/udf/trgm.lua
+ltree|libs/udf/ltree.lua
+pgcrypto|libs/udf/pgcrypto.lua

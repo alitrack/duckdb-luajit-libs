@@ -33,6 +33,7 @@ unzip|libs/parser/unzip.lua
 epub|libs/parser/epub.lua
 inv_ofd|libs/datasource/inv_ofd.lua
 incremental|libs/etl/incremental.lua
+merge_ups|libs/etl/merge_ups.lua
 scd2|libs/etl/scd2.lua
 to_lance|libs/etl/to_lance.lua
 highs|libs/optimize/highs.lua

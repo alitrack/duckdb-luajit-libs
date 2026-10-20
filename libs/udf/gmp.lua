@@ -190,15 +190,15 @@ local gmp = nil
 do
   local override = (os.getenv and os.getenv('GMP_LIB')) or ''
   local candidates = { override }
-  -- 注意：macOS 系统 GMP 是版本化文件名 /usr/lib/libgmp.10.dylib（dyld cache，无 libgmp.dylib 别名），
-  -- Homebrew 同；Linux 用 .so.10。候选按平台优先级排列。
+  -- macOS: 系统 GMP 只在 dyld shared cache 里（/usr/lib/libgmp.10.dylib，绝对路径 dlopen 反而找不到），
+  -- 必须用全文件名 'libgmp.10.dylib' 让 dyld 从 shared cache 解析；Homebrew 绝对路径做兜底。
+  -- Linux: libgmp.so.10（ldconfig）。Windows: 需自备 dll 或设 GMP_LIB。
   local extra = {
-    'libgmp.10',   -- macOS /usr/lib/libgmp.10.dylib
-    '/opt/homebrew/opt/gmp/lib/libgmp.10.dylib',   -- Homebrew arm64
-    '/usr/local/opt/gmp/lib/libgmp.10.dylib',      -- Homebrew x86_64
-    'libgmp.so.10', -- Linux
-    'libgmp',
-    'libgmp-10.dll', 'gmp-10.dll', 'gmp10', -- Windows
+    'libgmp.10.dylib',                                   -- macOS（dyld cache，系统自带）
+    '/opt/homebrew/opt/gmp/lib/libgmp.10.dylib',         -- Homebrew arm64 兜底
+    '/usr/local/opt/gmp/lib/libgmp.10.dylib',            -- Homebrew x86_64 兜底
+    'libgmp.so.10',                                       -- Linux
+    'libgmp-10.dll', 'gmp-10.dll', 'gmp10',              -- Windows
   }
   for _, c in ipairs(extra) do
     if c ~= override then candidates[#candidates + 1] = c end
@@ -224,8 +224,8 @@ do
     end
   end
   if not gmp then
-    gmp_load_error = '无法加载 GMP 库（尝试过: libgmp.10, /opt/homebrew/opt/gmp/lib/libgmp.10.dylib, libgmp.so.10, libgmp, libgmp-10.dll）。'
-      .. 'macOS 系统自带 /usr/lib/libgmp.10.dylib；Linux 需 libgmp10；Windows 需自备 libgmp-10.dll 或设 GMP_LIB=完整路径'
+    gmp_load_error = '无法加载 GMP 库（尝试过: libgmp.10.dylib, /opt/homebrew/opt/gmp/lib/libgmp.10.dylib, libgmp.so.10, libgmp-10.dll）。'
+      .. 'macOS 系统自带（dyld cache）；Linux 需 libgmp10；Windows 需自备 libgmp-10.dll 或设 GMP_LIB=完整路径'
   end
 end
 

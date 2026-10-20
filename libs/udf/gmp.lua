@@ -279,7 +279,7 @@ local function solve(p)
     b = make_num(g, b_s)
     if not b then g.__gmpz_clear(a); a = nil; return false end
     return true
-  }
+  end
   local function one()
     a_s, e = to_num(p.a)
     if e then return false end

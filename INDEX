@@ -38,6 +38,7 @@ scd2|libs/etl/scd2.lua
 to_lance|libs/etl/to_lance.lua
 highs|libs/optimize/highs.lua
 linalg|libs/linalg/linalg.lua
+gmp|libs/udf/gmp.lua
 rng|libs/stats/rng.lua
 dp|libs/stats/dp.lua
 tdx|libs/datasource/tdx.lua

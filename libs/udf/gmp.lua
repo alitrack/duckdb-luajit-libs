@@ -203,12 +203,13 @@ do
   for _, c in ipairs(extra) do
     if c ~= override then candidates[#candidates + 1] = c end
   end
+  local gmp_load_err_detail = {}
   for _, name in ipairs(candidates) do
     if name ~= '' then
       local ok, lib = pcall(ffi.load, name)
       if ok and type(lib) == 'table' then
         -- 自检：lib 必须导出核心符号（防加载到同名异体库）
-        local probe_ok = pcall(function()
+        local probe_ok, probe_err = pcall(function()
           local a = lib.__gmpz_init
           local b = lib.__gmpz_mul
           local c = lib.__gmpz_set_str
@@ -219,13 +220,17 @@ do
           gmp = lib
           gmp_loaded_name = name
           break
+        else
+          gmp_load_err_detail[#gmp_load_err_detail + 1] = name .. ': loaded but symbols missing (' .. tostring(probe_err) .. ')'
         end
+      else
+        gmp_load_err_detail[#gmp_load_err_detail + 1] = name .. ': ' .. tostring(lib)
       end
     end
   end
   if not gmp then
-    gmp_load_error = '无法加载 GMP 库（尝试过: libgmp.10.dylib, /opt/homebrew/opt/gmp/lib/libgmp.10.dylib, libgmp.so.10, libgmp-10.dll）。'
-      .. 'macOS 系统自带（dyld cache）；Linux 需 libgmp10；Windows 需自备 libgmp-10.dll 或设 GMP_LIB=完整路径'
+    gmp_load_error = '无法加载 GMP 库。诊断: ' .. table.concat(gmp_load_err_detail, ' | ')
+      .. '。macOS 系统自带（dyld cache, libgmp.10.dylib）；Linux 需 libgmp10；Windows 需自备 libgmp-10.dll 或设 GMP_LIB=完整路径'
   end
 end
 

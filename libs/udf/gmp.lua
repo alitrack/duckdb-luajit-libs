@@ -207,8 +207,10 @@ do
   for _, name in ipairs(candidates) do
     if name ~= '' then
       local ok, lib = pcall(ffi.load, name)
-      if ok and type(lib) == 'table' then
-        -- 自检：lib 必须导出核心符号（防加载到同名异体库）
+      -- 注意：LuaJIT 的 ffi.load 成功时返回 cdata（userdata），不是 table；
+      -- 只按 pcall 成功与否判断。
+      if ok then
+        -- 自检：lib 必须导出核心符号（防加载到同名异体库；cdef 已声明，符号访问合法）
         local probe_ok, probe_err = pcall(function()
           local a = lib.__gmpz_init
           local b = lib.__gmpz_mul

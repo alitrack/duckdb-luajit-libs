@@ -155,8 +155,13 @@ local function json_decode(s)
 end
 
 -- ============ GMP FFI 绑定 ============
+-- mpz_t 布局按 GMP 公开 ABI（gmp.h）：
+--   64 位平台 mp_limb_t = unsigned long（8B），_mp_size_t = int（4B），struct 共 16B
+--   （Windows x64 同为 unsigned long；32 位平台 GMP 用 unsigned int，本库目标为 64 位 DuckDB）
 ffi.cdef[[
-typedef struct mpz_struct mpz_t;
+typedef unsigned long mp_limb_t;
+typedef int _mp_size_t;
+typedef struct { _mp_size_t _mp_size; mp_limb_t *_mp_d; } mpz_t;
 void __gmpz_init(mpz_t*);
 void __gmpz_clear(mpz_t*);
 int  __gmpz_set_str(mpz_t*, const char*, int);

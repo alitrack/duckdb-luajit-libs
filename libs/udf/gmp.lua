@@ -199,8 +199,11 @@ do
       if ok and type(lib) == 'table' then
         -- 自检：lib 必须导出核心符号（防加载到同名异体库）
         local probe_ok = pcall(function()
-          local a = lib.ffi and nil or nil
-          lib.__gmpz_init; lib.__gmpz_mul; lib.__gmpz_set_str; lib.__gmpz_get_str
+          local a = lib.__gmpz_init
+          local b = lib.__gmpz_mul
+          local c = lib.__gmpz_set_str
+          local d = lib.__gmpz_get_str
+          assert(a and b and c and d)
         end)
         if probe_ok then
           gmp = lib

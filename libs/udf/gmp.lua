@@ -251,6 +251,9 @@ local function to_num(s)
 end
 
 local function make_num(g, s)
+  -- 防御纵深：s 非字符串（nil/数字/表）一律返回 nil，绝不把 NULL 喂给 __gmpz_set_str
+  -- （那会 GMP NULL 解引用 segfault，issue #2 的崩溃路径）。调用方的 `if not x then` 负责报错。
+  if type(s) ~= 'string' then return nil end
   local n = ffi.new('mpz_t[1]')
   g.__gmpz_init(n)
   local rc = g.__gmpz_set_str(n, s, 10)
@@ -281,11 +284,15 @@ local function solve(p)
   local out = { status = 'ok' }
 
   local function need_two()
+    -- 统一 3 返回值契约：成功 (a_s, b_s, nil)，失败 (nil, nil, errmsg)。
+    -- 失败时 errmsg 必须落在第 3 位，two() 的 `if e then return false` 才抓得住。
+    -- 旧版失败只返回 2 值 (nil, errmsg)，被 two() 的 3 目标赋值错位 → e 变 nil → 漏判
+    -- → make_num(nil) → __gmpz_set_str(n, NULL, 10) → GMP NULL 解引用 segfault（issue #2）。
     local a_s, e1 = to_num(p.a)
-    if not a_s then return nil, e1 end
+    if not a_s then return nil, nil, e1 end
     local b_s, e2 = to_num(p.b)
-    if not b_s then return nil, e2 end
-    return a_s, b_s
+    if not b_s then return nil, nil, e2 end
+    return a_s, b_s, nil
   end
 
   local a_s, b_s, e

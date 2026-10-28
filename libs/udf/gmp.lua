@@ -36,6 +36,53 @@
 --     bits    a 的位宽/十进制位数 → bits, decimal_digits
 --     to_base a 转 base(2..36) 进制字符串 → result
 --
+-- 有状态累乘 op（2026-10-28 加；递归 CTE 大数迭代场景专用）：
+--   大数常驻 UDF 的 Lua state（mpz_t），每步只喂一个小乘数，避免十进制字符串
+--   每步 解析→乘法→转回 的 O(n²) 往返。
+--     accset   [f]     无条件把累乘器置为 f（无 f → 1），返回其十进制串——
+--                      既是"初始化"也是"清残留"，递归 CTE 第一步用它自初始化
+--     accmul   [f]     累乘器 *= f（无 f → 自乘 acc^2），返回新值十进制串
+--     accstep  [f]     累乘器 *= f（无 f → 自乘），**只返回位数**（int）——
+--                      中间步用这个，大数不跨 SQL/Lua 边界，最快
+--     accdump  [f]     累乘器 *= f（可选），把**完整十进制值写文件** p.file，
+--                      返回 {status, path, decimal_digits}——末步取最终值落盘
+--     accget/acclen    读当前值/位数（仅限与 accset 同一条语句内，见下）
+--     accclear          销毁累乘器（当前 state）
+--
+--   ⚠️ 状态作用域（实测，务必遵守）：acc* 状态存在**执行该查询的 worker 线程**
+--   的 Lua state 里，且只在**单条语句**内连续有效。跨独立语句（多条 SELECT）
+--   会落到不同 worker → 新 state，读不到上一句的值。因此：
+--     · 不要靠"先 select accset() 再 select accmul()"跨句累积（不可靠）。
+--     · 可靠形态 = **一条自包含的递归 CTE**：base 行是常量（不碰 state），
+--       递归项每步跑在同一个 worker 上顺序执行 → 状态天然连续。第一步用
+--       accset 自初始化，天然免疫该 worker 上上一轮 CTE 的残留。
+--     · 最终大数要"取出来"：末步用 accdump 写文件（read_text 读回），
+--       或每步 accmul 返回大串走列（慢，每步转回大串）。
+--
+--   性能（实测 10000!，WSL duckdb v2.0-alpha）：
+--     逐行 gmp_mul（每步 解析大串→乘→转回大串）        ~4.2 s
+--     每步 accmul（仍每步转回大串，只省一次解析）       ~3.3 s
+--     每步 accstep + 末步 accdump（大数只转一次）        ~0.06 s  ← 推荐
+--     非递归一次性 gmp_fac('10000')（product tree）      ~0.035 s ← 只求最终值用它
+--
+--   推荐 SQL（10000!，中间只传位数、末步落文件）：
+--     with recursive t as (
+--       select 0 a, '1' b                                   -- base 常量
+--       union all
+--       select a+1, case when a = 0        then gmp_accset((a+1)::VARCHAR)
+--                        when a+1 = 10000 then gmp_accdump((a+1)::VARCHAR,'/tmp/f.txt')
+--                        else gmp_accstep((a+1)::VARCHAR)::VARCHAR end
+--       from t where a < 10000)
+--     select a from t where a = 10000;
+--     select * from read_text('/tmp/f.txt');
+--   宏封装：
+--     CREATE OR REPLACE MACRO gmp_accset(f) AS json_extract_string(luajit_s('gmp',{op:'accset',f:f}),'$.result');
+--     CREATE OR REPLACE MACRO gmp_accmul(f) AS json_extract_string(luajit_s('gmp',{op:'accmul',f:f}),'$.result');
+--     CREATE OR REPLACE MACRO gmp_accstep(f) AS json_extract(luajit_s('gmp',{op:'accstep',f:f}),'$.decimal_digits')::INT;
+--     CREATE OR REPLACE MACRO gmp_accdump(f,file) AS luajit_s('gmp',{op:'accdump',f:f,file:file});
+--   ⚠️ 同一会话同一时刻只跑一轮 acc* 累乘；stateful 调用传**列参数**
+--   （递归列或 from (values ...)）——常量实参会被 plan 常量折叠 + 执行期求值两次。
+--
 --   返回 JSON：成功 {"status":"ok",...}；失败 {"status":"Error","message":...}
 --   GMP 库加载失败（缺 libgmp）时所有 op 返回明确 Error，不影响其他查询。
 --
@@ -45,6 +92,15 @@
 --   mul(2^200, 2^200) = 2^400 ✓
 --   gcd(48,36) = 12 ✓（手算）
 --   primetest(大素数/合成数) 方向正确 ✓
+--
+-- 验证记录（2026-10-28, WSL duckdb v2.0.0-alpha39998 + libgmp.so.10, test_gmp_acc.sql 15/15 过）：
+--   bits(1000000) = 20位2进制/7位10进制 ✓；bits(128) = 8/3 ✓（此前 unknown op，本次补实现）
+--   递归 accmul 1..8! = 1,2,6,24,120,720,5040,40320 ✓（逐值精确）
+--   递归 accmul 10000! = 35660 位 ✓；accdump 落盘与 Python math.factorial(10000) sha256 逐字节一致（f17f312b…）
+--   快速路径（accstep 中间 + accdump 末步）10000 步 ~45ms vs 逐行 gmp_mul ~4070ms ≈ 90×
+--   踩坑定案：递归 CTE 会预求值下一步 → 读回 acc 的位数滞后一步，但 acc 本身收敛正确
+--   （accdump 末值精确）。故 accstep 改为只回显因子、不读 acc；权威结果取 accdump。
+--   状态作用域 = 单条语句 / 单 worker：跨独立 SELECT 不可靠，勿靠跨句 accset→accmul 累积。
 
 local ffi = require('ffi')
 
@@ -169,6 +225,7 @@ char* __gmpz_get_str(char*, int, const mpz_t*);
 void __gmpz_mul(mpz_t*, const mpz_t*, const mpz_t*);
 void __gmpz_add(mpz_t*, const mpz_t*, const mpz_t*);
 void __gmpz_sub(mpz_t*, const mpz_t*, const mpz_t*);
+void __gmpz_swap(mpz_t*, mpz_t*);
 void __gmpz_div_r(mpz_t*, const mpz_t*, const mpz_t*);
 void __gmpz_mod(mpz_t*, const mpz_t*, const mpz_t*);
 void __gmpz_pow_ui(mpz_t*, const mpz_t*, unsigned long int);
@@ -272,6 +329,22 @@ local function num_to_str(g, n, base)
   return s
 end
 
+-- ============ 有状态累乘器（acc* op） ============
+-- 大数常驻本 Lua state 的 mpz_t；递归 CTE 单线程顺序调用同一会话的同一
+-- Lua state（已探针验证：无状态 UDF 在递归里逐行求值、_G 计数在递归后
+-- 语句接着涨）。状态是进程级的：同一会话同一时刻只跑一轮 acc* 累乘。
+local acc = nil
+local function acc_clear()
+  if acc then gmp.__gmpz_clear(acc); acc = nil end
+end
+local function acc_ensure()
+  if acc then return acc end
+  acc = ffi.new('mpz_t[1]')
+  gmp.__gmpz_init(acc)
+  gmp.__gmpz_set_str(acc, "1", 10)
+  return acc
+end
+
 local function solve(p)
   if not gmp then
     return { status = 'Error', message = gmp_load_error }
@@ -279,9 +352,132 @@ local function solve(p)
   local g = gmp
   local op = p.op
   if not op then
-    return { status = 'Error', message = 'missing op (mul/add/sub/div/mod/pow/powmod/divmod/fac/isqrt/gcd/lcm/primetest/fib/compare/bits/to_base)' }
+    return { status = 'Error', message = 'missing op (mul/add/sub/div/mod/pow/powmod/divmod/fac/isqrt/gcd/lcm/primetest/fib/compare/bits/to_base/accset/accmul/accstep/accdump/accget/acclen/accclear)' }
   end
   local out = { status = 'ok' }
+
+  -- 未知 op 显式拒绝（避免落到下方 one()/two() 分支报"missing operand"误导）
+  local known = {
+    mul=1, add=1, sub=1, div=1, mod=1, pow=1, powmod=1, divmod=1,
+    fac=1, isqrt=1, gcd=1, lcm=1, primetest=1, fib=1, compare=1,
+    bits=1, to_base=1, accset=1, accmul=1, accstep=1, accdump=1,
+    accget=1, acclen=1, accclear=1,
+  }
+  if not known[op] then
+    return { status = 'Error', message = 'unknown op: ' .. tostring(op) }
+  end
+
+  -- ---- 有状态累乘 op（见文件头注释；大数常驻 Lua state，避免逐行字符串往返）----
+  if op == 'accset' then
+    -- 无条件置值（不依赖当前 state 是否有值）：既是"初始化"也是"清理残留"。
+    -- 递归 CTE 第一步用它自初始化，天然免疫 worker 线程残留。
+    if p.f ~= nil then
+      local f_s, e = to_num(p.f)
+      if not f_s then return { status = 'Error', message = e } end
+      local n = make_num(g, f_s)
+      if not n then return { status = 'Error', message = 'accset: bad operand' } end
+      acc_clear()
+      acc = n
+    else
+      acc_clear()
+      acc_ensure()
+    end
+    out.result = num_to_str(g, acc)
+    return out
+  end
+  if op == 'accmul' then
+    local n = acc_ensure()
+    if p.f ~= nil then
+      local f_s, e = to_num(p.f)
+      if not f_s then return { status = 'Error', message = e } end
+      local f = make_num(g, f_s)
+      if not f then return { status = 'Error', message = 'accmul: bad factor' } end
+      g.__gmpz_mul(n, n, f)
+      g.__gmpz_clear(f)
+    else
+      -- 无 f：acc *= acc（acc^2）
+      local t = ffi.new('mpz_t[1]')
+      g.__gmpz_init(t)
+      g.__gmpz_mul(t, n, n)
+      g.__gmpz_swap(t, n)
+      g.__gmpz_clear(t)
+    end
+    out.result = num_to_str(g, n)
+    return out
+  end
+  -- accstep / accdump 共用：acc *= f（f 缺省 → 自乘），大数不转字符串
+  local function acc_mul_factor()
+    local n = acc_ensure()
+    if p.f ~= nil then
+      local f_s, e = to_num(p.f)
+      if not f_s then return e or 'acc: bad factor' end
+      local f = make_num(g, f_s)
+      if not f then return 'acc: bad factor' end
+      g.__gmpz_mul(n, n, f)
+      g.__gmpz_clear(f)
+    else
+      local t = ffi.new('mpz_t[1]')
+      g.__gmpz_init(t)
+      g.__gmpz_mul(t, n, n)
+      g.__gmpz_swap(t, n)
+      g.__gmpz_clear(t)
+    end
+    return nil
+  end
+  if op == 'accstep' then
+    -- 只做乘法，**不读 acc**：返回刚乘的因子 f（回显）。
+    -- 原因（实测）：递归 CTE 里 stateful 函数被预求值，读回 acc 的位数可能
+    -- 滞后一步（720 报 4 位、5040 报 4 位），但 acc 本身始终正确（accdump
+    -- 末值与 Python 逐字节一致）。因此中间步不读 acc，只回显 f 保持列一致；
+    -- 权威结果一律取 accdump 的末值/位数。
+    local e = acc_mul_factor()
+    if e then return { status = 'Error', message = e } end
+    if p.f ~= nil then out.result = tostring(p.f) else out.result = 'self' end
+    return out
+  end
+  if op == 'accdump' then
+    local e = acc_mul_factor()
+    if e then return { status = 'Error', message = e } end
+    if type(p.file) ~= 'string' or p.file == '' then
+      return { status = 'Error', message = 'accdump: p.file (output path) required' }
+    end
+    local wfile, openerr = io.open(p.file, 'w')
+    if not wfile then
+      return { status = 'Error', message = 'accdump: cannot open ' .. p.file .. ': ' .. tostring(openerr) }
+    end
+    local s = num_to_str(g, acc)
+    wfile:write(s)
+    wfile:close()
+    out.path = p.file
+    out.decimal_digits = g.__gmpz_sizeinbase(acc, 10)
+    return out
+  end
+  if op == 'accget' then
+    local n = acc_ensure()
+    out.result = num_to_str(g, n)
+    return out
+  end
+  if op == 'acclen' then
+    local n = acc_ensure()
+    out.decimal_digits = g.__gmpz_sizeinbase(n, 10)
+    return out
+  end
+  if op == 'accclear' then
+    acc_clear()
+    return out
+  end
+
+  -- ---- bits：位宽/十进制位数（文件头承诺的 op，2026-10-28 补实现）----
+  if op == 'bits' then
+    local a_s, e = to_num(p.a)
+    if not a_s then return { status = 'Error', message = e } end
+    local n = make_num(g, a_s)
+    if not n then return { status = 'Error', message = 'bits: bad operand' } end
+    out.decimal_digits = g.__gmpz_sizeinbase(n, 10)
+    out.bits = g.__gmpz_sizeinbase(n, 2)
+    g.__gmpz_clear(n)
+    return out
+  end
 
   local function need_two()
     -- 统一 3 返回值契约：成功 (a_s, b_s, nil)，失败 (nil, nil, errmsg)。

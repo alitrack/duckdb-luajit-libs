@@ -42,8 +42,11 @@
 --     accset   [f]     无条件把累乘器置为 f（无 f → 1），返回其十进制串——
 --                      既是"初始化"也是"清残留"，递归 CTE 第一步用它自初始化
 --     accmul   [f]     累乘器 *= f（无 f → 自乘 acc^2），返回新值十进制串
---     accstep  [f]     累乘器 *= f（无 f → 自乘），**只返回位数**（int）——
---                      中间步用这个，大数不跨 SQL/Lua 边界，最快
+--     accstep  [f]     累乘器 *= f（无 f → 自乘），**只回显因子 f（VARCHAR）**——
+--                      中间步用这个，大数不跨 SQL/Lua 边界，最快。
+--                      ⚠️ 不要改成"返回位数 ::INT"：递归 CTE 里 CASE 分支会
+--                      INTEGER vs VARCHAR 混型 → Binder Error（issue #3）；
+--                      且引擎会预求值下一步，读回 acc 的位数滞后一步，无意义
 --     accdump  [f]     累乘器 *= f（可选），把**完整十进制值写文件** p.file，
 --                      返回 {status, path, decimal_digits}——末步取最终值落盘
 --     accget/acclen    读当前值/位数（仅限与 accset 同一条语句内，见下）
@@ -65,20 +68,21 @@
 --     每步 accstep + 末步 accdump（大数只转一次）        ~0.06 s  ← 推荐
 --     非递归一次性 gmp_fac('10000')（product tree）      ~0.035 s ← 只求最终值用它
 --
---   推荐 SQL（10000!，中间只传位数、末步落文件）：
+--   推荐 SQL（10000!，中间只传因子回显、末步落文件；CASE 分支全 VARCHAR）：
 --     with recursive t as (
 --       select 0 a, '1' b                                   -- base 常量
 --       union all
 --       select a+1, case when a = 0        then gmp_accset((a+1)::VARCHAR)
 --                        when a+1 = 10000 then gmp_accdump((a+1)::VARCHAR,'/tmp/f.txt')
---                        else gmp_accstep((a+1)::VARCHAR)::VARCHAR end
+--                        else gmp_accstep((a+1)::VARCHAR) end
 --       from t where a < 10000)
 --     select a from t where a = 10000;
 --     select * from read_text('/tmp/f.txt');
---   宏封装：
+--   宏封装（分支类型统一 VARCHAR；accstep 用 json_extract_string，
+--   切勿 ::INT —— 与 accset/accdump 的 VARCHAR 分支混型 → Binder Error，issue #3）：
 --     CREATE OR REPLACE MACRO gmp_accset(f) AS json_extract_string(luajit_s('gmp',{op:'accset',f:f}),'$.result');
 --     CREATE OR REPLACE MACRO gmp_accmul(f) AS json_extract_string(luajit_s('gmp',{op:'accmul',f:f}),'$.result');
---     CREATE OR REPLACE MACRO gmp_accstep(f) AS json_extract(luajit_s('gmp',{op:'accstep',f:f}),'$.decimal_digits')::INT;
+--     CREATE OR REPLACE MACRO gmp_accstep(f) AS json_extract_string(luajit_s('gmp',{op:'accstep',f:f}),'$.result');
 --     CREATE OR REPLACE MACRO gmp_accdump(f,file) AS luajit_s('gmp',{op:'accdump',f:f,file:file});
 --   ⚠️ 同一会话同一时刻只跑一轮 acc* 累乘；stateful 调用传**列参数**
 --   （递归列或 from (values ...)）——常量实参会被 plan 常量折叠 + 执行期求值两次。
@@ -101,6 +105,14 @@
 --   踩坑定案：递归 CTE 会预求值下一步 → 读回 acc 的位数滞后一步，但 acc 本身收敛正确
 --   （accdump 末值精确）。故 accstep 改为只回显因子、不读 acc；权威结果取 accdump。
 --   状态作用域 = 单条语句 / 单 worker：跨独立 SELECT 不可靠，勿靠跨句 accset→accmul 累积。
+--
+-- 验证记录（2026-10-29, WSL duckdb v2.0.0-alpha39998, test_gmp_issue3.sql）：
+--   issue #3（外部用户）：gmp.lua 头部旧宏 gmp_accstep = json_extract(...)::INT，
+--   递归 CTE 里 CASE 三分支 INTEGER vs VARCHAR 混型 → Binder Error。根因 = 头部文档
+--   宏落后于实现（accstep 早已改为回显因子 VARCHAR；::INT 版本还有预求值滞后坑）。
+--   修复 = 头部宏/推荐 SQL 同步为 json_extract_string 形态（CASE 分支全 VARCHAR），
+--   issue 原文递归（10000 步）全过：accdump decimal_digits=35660、落盘 35660 字节、
+--   sha256 f17f312b… 与 Python math.factorial(10000) 逐字节一致（10-28 锚点同值）。
 
 local ffi = require('ffi')
 

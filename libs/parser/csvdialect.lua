@@ -78,13 +78,257 @@ local function fetch_source(url)
   return res
 end
 
+-- ============ 透明解压（.gz/.xz/.bz2/.zstd，FFI 单发 API 优先 / CLI 回退）============
+-- 背景：原生 read_csv 只透明读 .csv.gz；.csv.xz/.csv.bz2/.csv.zstd 被当 CSV 误解析
+-- （2.0-alpha39998 与 1.5.6 实测 2026-10-20）；compression_fs 尚 pending →
+-- 表函数入口补位，一个 SQL 入口跨格式（duckdb/duckdb#12232）。
+-- LuaJIT 造不出 C 回调 → FFI 只用单发/增量排空 API：
+--   gz   = zlib uncompress 只认 **zlib 容器格式**（0x78 头），解不开 gzip 文件
+--          （magic 1f 8b，rc=-3）——.csv.gz 是 gzip 文件 → FFI 失败后走 CLI `gzip -dc`
+--   xz   = FFI 调 lzma_easy_buffer_decode，但标准 liblzma 不导出该符号
+--          （实际导出的是 lzma_stream_buffer_decode，9 参）→ 运行期 undefined
+--          symbol 被 pcall 捕获 → 落到 CLI `xz -dc`（FFI 仅作未来修复入口）
+--   zstd = 单发 ZSTD_decompress（frame 存 content size 时精确一次）
+--          否则 ZSTD_decompressStream（inBuffer/outBuffer .pos 自增，循环排空）
+--   bz2  = libbz2 只有回调 API → 仅 CLI
+-- lzma_stream / ZSTD_DStream 声明不透明：ffi.new('char[1024]') 零初始化后 cast
+-- （文档要求 zero-init，缓冲区远大于真实结构体尺寸）。
+local COMPRESS_NO_FFI = (os.getenv('CSVDIALECT_NO_FFI') ~= nil)
+local okffi, ffi = pcall(require, 'ffi')
+if COMPRESS_NO_FFI or not okffi then ffi = nil end
+
+-- 注意：env 单独传，不塞进 candidates 表。`{ os.getenv('X'), 'z', ... }` 在
+-- X 未设时是 [1]=nil 的空洞表 → ipairs 第一步就停 → 一个库都不试（tried 恒空）。
+local function load_lib_chain(envval, defaults)
+  if not ffi then return nil, 'ffi unavailable' end
+  local tried = {}
+  local function attempt(c)
+    if c ~= nil and not tried[c] then
+      tried[c] = true
+      local ok, lib = pcall(ffi.load, c)
+      if ok then return lib end
+    end
+    return nil
+  end
+  local l = attempt(envval)
+  if l then return l end
+  for _, c in ipairs(defaults) do
+    l = attempt(c)
+    if l then return l end
+  end
+  return nil, 'no loadable library (tried: ' .. table.concat(tried, ', ') .. ')'
+end
+
+local COMPRESS_CDEFFED = false
+local function ensure_compress_cdefs()
+  if not ffi then return false end
+  if COMPRESS_CDEFFED then return true end
+  local ok, e = pcall(function()
+    -- uncompress 签名与 libs/udf/zlib.lua 逐字一致（同进程重复 cdef 合法）
+    ffi.cdef[[
+      int uncompress(unsigned char *dest, unsigned long *destLen,
+                     const unsigned char *source, unsigned long sourceLen);
+      typedef enum { LZMA_OK = 0, LZMA_STREAM_END = 1, LZMA_DATA_ERROR = 9 } lzma_ret;
+      lzma_ret lzma_easy_buffer_decode(lzma_ret *limited, uint32_t *flags,
+        const void *options, const uint8_t *in, size_t in_size,
+        uint8_t **out, size_t *out_size);
+      typedef struct ZSTD_DStream { int dummy; } ZSTD_DStream;
+      typedef struct { const void *src; size_t size; size_t pos; } ZSTD_inBuffer;
+      typedef struct { void *dst; size_t size; size_t pos; } ZSTD_outBuffer;
+      unsigned long long ZSTD_getFrameContentSize(const void *src, size_t srcSize);
+      size_t ZSTD_decompress(void *dst, size_t dstCapacity, const void *src, size_t srcSize);
+      void *ZSTD_createDStream(void);
+      size_t ZSTD_initDStream(void *dstream);
+      size_t ZSTD_decompressStream(void *dstream, ZSTD_outBuffer *output,
+                                   ZSTD_inBuffer *input);
+      void ZSTD_freeDStream(void *dstream);
+      int ZSTD_isError(size_t code);
+    ]]
+  end)
+  if not ok then
+    -- 相同 cdef 重复声明（zlib.lua 先跑过）→ LuaJIT 容忍或报 redefine，均视为已声明
+    if tostring(e):find('redefine') then COMPRESS_CDEFFED = true; return true end
+    return false
+  end
+  COMPRESS_CDEFFED = true
+  return true
+end
+
+local function gz_uncompress(data)
+  if not ffi then return nil, 'ffi unavailable' end
+  if not ensure_compress_cdefs() then return nil, 'zlib cdef failed' end
+  local lib, le = load_lib_chain(os.getenv('Z_LIB'), { 'z', 'libz', 'libz.so.1',
+    'zlib1', 'zlib1.dll', '/usr/lib/x86_64-linux-gnu/libz.so.1' })
+  if not lib then return nil, le end
+  local n = #data
+  local cap = n * 4 + 64
+  for attempt = 1, 30 do
+    local out = ffi.new('unsigned char[?]', cap)
+    local dlen = ffi.new('unsigned long[1]')
+    dlen[0] = ffi.cast('unsigned long', cap)
+    local rc = lib.uncompress(out, dlen, data, ffi.cast('unsigned long', n))
+    if rc == 0 then
+      return ffi.string(out, dlen[0])
+    elseif rc == -5 then -- Z_BUF_ERROR：dest 太小，倍增重试
+      cap = cap * 2
+    else
+      return nil, 'zlib uncompress rc=' .. rc
+    end
+  end
+  return nil, 'zlib uncompress: output exceeded growth bound'
+end
+
+local function xz_uncompress(data)
+  if not ffi then return nil, 'ffi unavailable' end
+  if not ensure_compress_cdefs() then return nil, 'lzma cdef failed' end
+  local lib, le = load_lib_chain(os.getenv('LZMA_LIB'), { 'lzma', 'liblzma',
+    'liblzma.so.5', 'lzma.dll', '/usr/lib/x86_64-linux-gnu/liblzma.so.5' })
+  if not lib then return nil, le end
+  -- 高层 API：库内自行分配输出缓冲，只返回 (mem, memsize)。
+  -- 默认 flags=0 只接受单帧（zstd -c / xz -c 单帧 .xz 正是单帧；多流 .xz 报错清晰）。
+  local mem = ffi.new('uint8_t *')
+  local memsize = ffi.new('size_t[1]')
+  local ret = lib.lzma_easy_buffer_decode(ffi.new('lzma_ret[1]'), ffi.new('uint32_t[1]'),
+    nil, ffi.cast('const uint8_t *', data), ffi.cast('size_t', #data), mem, memsize)
+  if ret ~= 0 then
+    return nil, 'xz easy decode ret=' .. ret ..
+      ' (ret=9 DATA_ERROR=corrupt / ret=5 UNSUPPORTED_ENCODING / 非单帧流)'
+  end
+  if memsize[0] == 0 then return nil, 'xz: empty stream' end
+  return ffi.string(mem, memsize[0])
+end
+
+local function zstd_uncompress(data)
+  if not ffi then return nil, 'ffi unavailable' end
+  if not ensure_compress_cdefs() then return nil, 'zstd cdef failed' end
+  local lib, le = load_lib_chain(os.getenv('ZSTD_LIB'), { 'zstd', 'libzstd',
+    'libzstd.so.1', 'zstd.dll', '/usr/lib/x86_64-linux-gnu/libzstd.so.1' })
+  if not lib then return nil, le end
+  local n = #data
+  -- 快路径：frame 存了 content size（zstd CLI/库默认）→ 精确单发
+  local fcs = lib.ZSTD_getFrameContentSize(data, ffi.cast('size_t', n))
+  if fcs > 0 then
+    local out = ffi.new('unsigned char[?]', fcs)
+    local rc = lib.ZSTD_decompress(out, ffi.cast('size_t', fcs), data, ffi.cast('size_t', n))
+    if not lib.ZSTD_isError(rc) and rc == fcs then
+      return ffi.string(out, fcs)
+    end
+    return nil, 'zstd ZSTD_decompress failed rc=' .. tostring(rc)
+  end
+  -- 回退：流式排空。DStream 由库分配（ZSTD_createDStream），避免手写不透明结构体
+  -- 尺寸踩版本差异坑；inBuffer/outBuffer 的 .pos 自增驱动循环。
+  local inb = ffi.new('ZSTD_inBuffer')
+  inb.src = ffi.cast('const void *', data); inb.size = ffi.cast('size_t', n); inb.pos = ffi.cast('size_t', 0)
+  local dctx = lib.ZSTD_createDStream()
+  if dctx == nil then return nil, 'zstd ZSTD_createDStream failed' end
+  if lib.ZSTD_initDStream(dctx) ~= 0 then
+    lib.ZSTD_freeDStream(dctx)
+    return nil, 'zstd ZSTD_initDStream failed'
+  end
+  local cap = n * 4 + 64
+  local buf = ffi.new('char[?]', cap)
+  local outb = ffi.new('ZSTD_outBuffer')
+  outb.dst = ffi.cast('void *', buf); outb.size = ffi.cast('size_t', cap); outb.pos = ffi.cast('size_t', 0)
+  local parts = {}
+  local done = false
+  for guard = 1, 1024 do
+    outb.pos = ffi.cast('size_t', 0)
+    local hint = lib.ZSTD_decompressStream(dctx, outb, inb)
+    if outb.pos > 0 then
+      parts[#parts + 1] = ffi.string(buf, outb.pos)
+    end
+    if hint == 0 then -- 帧完成（或输入耗尽；我们已全量供给）
+      done = true
+      break
+    end
+    if lib.ZSTD_isError(hint) then
+      lib.ZSTD_freeDStream(dctx)
+      return nil, 'zstd decompressStream error ' .. tostring(hint)
+    end
+    -- 输出块被本块打满（drain 前判断，否则 pos 已被清零丢失信息）→ 扩容再续
+    if outb.pos >= outb.size then
+      cap = cap * 2
+      buf = ffi.new('char[?]', cap)
+      outb.dst = ffi.cast('void *', buf); outb.size = ffi.cast('size_t', cap)
+    end
+    if inb.pos >= inb.size then
+      lib.ZSTD_freeDStream(dctx)
+      return nil, 'zstd: frame incomplete (truncated?)'
+    end
+  end
+  lib.ZSTD_freeDStream(dctx)
+  if not done and #parts == 0 then return nil, 'zstd: no output produced (corrupt frame?)' end
+  if #parts == 0 then return nil, 'zstd: empty frame' end
+  return table.concat(parts)
+end
+
+local DECOMPRESSORS_FFI = {
+  gz = gz_uncompress, xz = xz_uncompress, zstd = zstd_uncompress,
+}
+
+local CLI_CMDS = {
+  gz = 'gzip -dc', xz = 'xz -dc', bz2 = 'bzip2 -dc', zstd = 'zstd -dc',
+}
+
+local function cli_uncompress(fmt, path)
+  local cmd = CLI_CMDS[fmt]
+  if not cmd then return nil, 'no CLI for ' .. fmt end
+  local isw = (os.getenv('PROCESSOR_ARCHITECTURE') ~= nil or os.getenv('COMPUTERNAME') ~= nil)
+  local p = path:gsub("'", isw and '""' or "'\\''")
+  local arg = isw and ('"' .. p .. '"') or ("'" .. p .. "'")
+  local pipe = io.popen(cmd .. ' ' .. arg .. ' 2>/dev/null')
+  if not pipe then return nil, 'io.popen failed (restricted mode?)' end
+  local out = pipe:read('*a')
+  pipe:close()
+  if not out or out == '' then
+    return nil, cmd .. ' produced no output (tool missing or corrupt file)'
+  end
+  return out
+end
+
+local function maybe_decompress(fmt, raw, path)
+  local ok, r1, r2 = pcall(DECOMPRESSORS_FFI[fmt] and
+    function() return DECOMPRESSORS_FFI[fmt](raw) end or
+    function() return nil, 'no FFI decompressor for ' .. fmt end)
+  if ok and r1 then return r1 end
+  local err = tostring(ok and r2 or r1)
+  if path and not path:match('^https?://') then
+    local c, cerr = cli_uncompress(fmt, path)
+    if c then return c end
+    return nil, ('decompress %s failed [ffi: %s; cli: %s]'):format(fmt, err, tostring(cerr))
+  end
+  return nil, ('decompress %s failed [ffi: %s]'):format(fmt, err)
+end
+
+local function fmt_of(src)
+  -- 返回 'gz'|'xz'|'bz2'|'zstd'|'none'（按扩展名；大小写不敏感，剥 query）。
+  -- 用 sub(-N) 后缀判断，**不走 Lua pattern**：pattern 里 `|` 不是交替（当字面量）、
+  -- 且 match 对含可选捕获组的 pattern 返回的是捕获组值（未参与时恒 nil，即使匹配成功）
+  -- ——原 `%.zst(andard)?$` 与 `(gz|zgz)$` 正是这两个坑，.gz/.zst 被静默判成 none。
+  if not src then return 'none' end
+  local s = src:match('^https?://') and src:match('[^#?]*') or src
+  local lower = s:lower()
+  if lower:sub(-4) == '.zgz' then return 'gz' end
+  if lower:sub(-3) == '.gz' then return 'gz' end
+  if lower:sub(-3) == '.xz' then return 'xz' end
+  if lower:sub(-4) == '.bz2' then return 'bz2' end
+  if lower:sub(-10) == '.zstandard' then return 'zstd' end
+  if lower:sub(-4) == '.zst' then return 'zstd' end
+  return 'none'
+end
+
 local function read_input(p)
-  -- 本地文件
   local v = p.v
   if (not v or v == '') and p.file and p.file ~= '' then
-    local f = io.open(p.file, 'r')
+    local f = io.open(p.file, 'rb')
     if not f then return nil, 'cannot open '..tostring(p.file) end
     v = f:read('*a'); f:close()
+    local fmt = fmt_of(p.file)
+    if fmt ~= 'none' then
+      local dv, derr = maybe_decompress(fmt, v, p.file)
+      if not dv then return nil, derr end
+      v = dv
+    end
   end
   -- HTTP(S) URL（FFI 优先，curl CLI 回退；复用 jev_ask 的传输层模式）
   if (not v or v == '') and p.url and p.url ~= '' then
@@ -99,11 +343,17 @@ end
 local function read_source(path)
   if not path or path == '' then return nil, 'no source' end
   if path:match('^https?://') then
-    return fetch_source(path)
+    return fetch_source(path) -- URL 压缩暂不支持（compression_fs 落地前，先覆盖本地）
   end
-  local f = io.open(path, 'r')
+  local f = io.open(path, 'rb')
   if not f then return nil, 'cannot open '..tostring(path) end
   local v = f:read('*a'); f:close()
+  local fmt = fmt_of(path)
+  if fmt ~= 'none' then
+    local dv, derr = maybe_decompress(fmt, v, path)
+    if not dv then return nil, derr end
+    v = dv
+  end
   return v
 end
 

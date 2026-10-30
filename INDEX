@@ -60,3 +60,7 @@ pgcrypto|libs/udf/pgcrypto.lua
 rsi_scorer|libs/ml/rsi_scorer.lua
 jieba|libs/udf/jieba.lua
 pgrouting|libs/udf/pgrouting.lua
+bignum|libs/udf/bignum.lua
+basexx|libs/udf/basexx.lua
+soundex|libs/udf/soundex.lua
+zlib|libs/udf/zlib.lua

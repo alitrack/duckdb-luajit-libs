@@ -136,6 +136,11 @@ SELECT COUNT(*) AS n19 FROM luajit_table('cd', list := '{"file": "/mnt/d/wsl2/tm
 -- 20. 表函数错误可见（ERR 行而非静默 0 行）
 SELECT val FROM luajit_table('cd', list := '{"file": "/nonexistent/path"}');   -- ERR: ...
 
+-- 20b. 透明解压回归（.gz 文件 → 解压后行数同明文 n18；守护 cdef/解压链路：
+--      ffi.cdef 块里若误放 Lua `--` 注释 → 整块 cdef 失败 → FFI 解压全挂回 CLI）
+SELECT COUNT(*) AS n20b FROM luajit_table('cd', list := '/mnt/d/wsl2/tmp/co2_mm_mlo.txt.gz');   -- 822（与明文 n18 同）
+SELECT COUNT(*) AS n20c FROM luajit_table('cd', list := '{"file": "/mnt/d/wsl2/tmp/co2_mm_mlo.txt.gz", "skip_header": true}');   -- 821
+
 -- 21. read_csv_dialect 式一行封装（table macro，真名可用；v2.0 无内置 read_csv_dialect，
 --     v1.x 有内置同名函数，本宏会遮蔽它——按需在别名上创建）
 -- SET table_function_identifier_conversion = 'ENABLE_IMPLICIT_STRING';  -- 老版传参行为，免 deprecation 警告

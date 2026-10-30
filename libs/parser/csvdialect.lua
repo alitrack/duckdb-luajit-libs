@@ -85,9 +85,9 @@ end
 -- LuaJIT 造不出 C 回调 → FFI 只用单发/增量排空 API：
 --   gz   = zlib uncompress 只认 **zlib 容器格式**（0x78 头），解不开 gzip 文件
 --          （magic 1f 8b，rc=-3）——.csv.gz 是 gzip 文件 → FFI 失败后走 CLI `gzip -dc`
---   xz   = FFI 调 lzma_easy_buffer_decode，但标准 liblzma 不导出该符号
---          （实际导出的是 lzma_stream_buffer_decode，9 参）→ 运行期 undefined
---          symbol 被 pcall 捕获 → 落到 CLI `xz -dc`（FFI 仅作未来修复入口）
+--   xz   = FFI 调 lzma_stream_buffer_decode（单发，签名取自 /usr/include/lzma/container.h，
+--          已对照真头核对）→ *memlimit 先给上限 + BUF_ERROR 扩容 / MEMLIMIT 取回值重试；
+--          失败再落 CLI `xz -dc` 兜底
 --   zstd = 单发 ZSTD_decompress（frame 存 content size 时精确一次）
 --          否则 ZSTD_decompressStream（inBuffer/outBuffer .pos 自增，循环排空）
 --   bz2  = libbz2 只有回调 API → 仅 CLI
@@ -128,10 +128,13 @@ local function ensure_compress_cdefs()
     ffi.cdef[[
       int uncompress(unsigned char *dest, unsigned long *destLen,
                      const unsigned char *source, unsigned long sourceLen);
-      typedef enum { LZMA_OK = 0, LZMA_STREAM_END = 1, LZMA_DATA_ERROR = 9 } lzma_ret;
-      lzma_ret lzma_easy_buffer_decode(lzma_ret *limited, uint32_t *flags,
-        const void *options, const uint8_t *in, size_t in_size,
-        uint8_t **out, size_t *out_size);
+      /* liblzma 单发解压（签名取自系统 /usr/include/lzma/container.h:916，对照真头核对）。
+         第 1 参 *memlimit 必须先给上限，传 0 → LZMA_MEMLIMIT_ERROR(6)，库把所需值写回。 */
+      typedef enum { LZMA_OK = 0, LZMA_STREAM_END = 1, LZMA_MEM_ERROR = 5,
+        LZMA_MEMLIMIT_ERROR = 6, LZMA_DATA_ERROR = 7, LZMA_BUF_ERROR = 8 } lzma_ret;
+      lzma_ret lzma_stream_buffer_decode(uint64_t *memlimit, uint32_t flags,
+        const void *allocator, const uint8_t *in, size_t *in_pos, size_t in_size,
+        uint8_t *out, size_t *out_pos, size_t out_size);
       typedef struct ZSTD_DStream { int dummy; } ZSTD_DStream;
       typedef struct { const void *src; size_t size; size_t pos; } ZSTD_inBuffer;
       typedef struct { void *dst; size_t size; size_t pos; } ZSTD_outBuffer;
@@ -184,18 +187,44 @@ local function xz_uncompress(data)
   local lib, le = load_lib_chain(os.getenv('LZMA_LIB'), { 'lzma', 'liblzma',
     'liblzma.so.5', 'lzma.dll', '/usr/lib/x86_64-linux-gnu/liblzma.so.5' })
   if not lib then return nil, le end
-  -- 高层 API：库内自行分配输出缓冲，只返回 (mem, memsize)。
-  -- 默认 flags=0 只接受单帧（zstd -c / xz -c 单帧 .xz 正是单帧；多流 .xz 报错清晰）。
-  local mem = ffi.new('uint8_t *')
-  local memsize = ffi.new('size_t[1]')
-  local ret = lib.lzma_easy_buffer_decode(ffi.new('lzma_ret[1]'), ffi.new('uint32_t[1]'),
-    nil, ffi.cast('const uint8_t *', data), ffi.cast('size_t', #data), mem, memsize)
-  if ret ~= 0 then
-    return nil, 'xz easy decode ret=' .. ret ..
-      ' (ret=9 DATA_ERROR=corrupt / ret=5 UNSUPPORTED_ENCODING / 非单帧流)'
+  -- 单发 .xz 解码（xz -c 单帧）。真实调用惯例：
+  --   *memlimit 必须先给上限，传 0 → LZMA_MEMLIMIT_ERROR(6)，库把所需值写回 *memlimit；
+  --   失败时 in_pos/out_pos 不前进 → 可从原起点整块重试（BUF_ERROR 扩容 / MEMLIMIT 取回值）。
+  -- flags=0 仅接受单帧流（xz -c / xz -d 产物正是单帧；多成员 .xz 需 LZMA_CONCATENATED，超出本路径）。
+  local n = #data
+  local in_pos = ffi.new('size_t[1]')
+  local out_pos = ffi.new('size_t[1]')
+  local memlimit = ffi.new('uint64_t[1]')
+  local DEFAULT_ML = ffi.cast('uint64_t', 4294967296)  -- 4GB 上限（Lua double 内精确）
+  local cap = math.max(n * 8, 65536)
+  local outbuf = ffi.new('char[?]', cap)
+  local last
+  for attempt = 1, 16 do
+    in_pos[0] = 0
+    out_pos[0] = 0
+    memlimit[0] = DEFAULT_ML
+    last = lib.lzma_stream_buffer_decode(memlimit, ffi.cast('uint32_t', 0), nil,
+      ffi.cast('const uint8_t *', data), in_pos, ffi.cast('size_t', n),
+      ffi.cast('uint8_t *', outbuf), out_pos, ffi.cast('size_t', cap))
+    local ret = tonumber(last)
+    if ret == 0 or ret == 1 then
+      if out_pos[0] == 0 then return nil, 'xz: empty stream' end
+      return ffi.string(outbuf, tonumber(out_pos[0]))
+    elseif ret == 8 then -- LZMA_BUF_ERROR：输出缓冲太小，倍增重试
+      cap = cap * 2
+      outbuf = ffi.new('char[?]', cap)
+    elseif ret == 6 then -- LZMA_MEMLIMIT_ERROR：*memlimit 已被写为所需值，取回重试
+      local need = tonumber(memlimit[0])
+      if need and need > 0 and need < DEFAULT_ML then
+        DEFAULT_ML = ffi.cast('uint64_t', need)
+      end
+    else
+      local msg = { [5]='MEM_ERROR', [6]='MEMLIMIT_ERROR', [7]='DATA_ERROR',
+        [8]='BUF_ERROR', [3]='FORMAT_ERROR', [4]='OPTIONS_ERROR' }
+      return nil, 'xz decode ret=' .. ret .. ' (' .. (msg[ret] or 'unknown') .. ')'
+    end
   end
-  if memsize[0] == 0 then return nil, 'xz: empty stream' end
-  return ffi.string(mem, memsize[0])
+  return nil, 'xz decode: exceeded growth/retry bound (ret=' .. tostring(last) .. ')'
 end
 
 local function zstd_uncompress(data)

@@ -251,8 +251,8 @@ void __gmpz_lcm(mpz_t*, const mpz_t*, const mpz_t*);
 int  __gmpz_cmp(const mpz_t*, const mpz_t*);
 int  __gmpz_sizeinbase(const mpz_t*, int);
 int  __gmpz_probab_prime_p(const mpz_t*, int);
-void __gmpz_fib_ui(mpz_t*, unsigned long int);
-int  __gmpz_sdiv_qr(mpz_t*, mpz_t*, const mpz_t*, const mpz_t*);
+int  __gmpz_fib_ui(mpz_t*, unsigned long int);
+void __gmpz_tdiv_qr(mpz_t*, mpz_t*, const mpz_t*, const mpz_t*);
 void __gmpz_abs(mpz_t*, const mpz_t*);
 ]]
 
@@ -284,13 +284,18 @@ do
       -- 注意：LuaJIT 的 ffi.load 成功时返回 cdata（userdata），不是 table；
       -- 只按 pcall 成功与否判断。
       if ok then
-        -- 自检：lib 必须导出核心符号（防加载到同名异体库；cdef 已声明，符号访问合法）
+        -- 自检：lib 必须导出核心符号（防加载到同名异体库；cdef 已声明，符号访问合法）。
+        -- 必须探测 div 路径用的 __gmpz_tdiv_qr：GMP 的 __gmpz_sdiv_qr 只是历史
+        -- 别名，标准 libgmp 共享库构建（Debian/macOS）不导出 → 不探测的话 div/
+        -- divmod 会在执行时才 "undefined symbol"（issue #4），且符号访问失败会
+        -- 抛错（被下面 pcall 捕获）。
         local probe_ok, probe_err = pcall(function()
           local a = lib.__gmpz_init
           local b = lib.__gmpz_mul
           local c = lib.__gmpz_set_str
           local d = lib.__gmpz_get_str
-          assert(a and b and c and d)
+          local e = lib.__gmpz_tdiv_qr
+          assert(a and b and c and d and e)
         end)
         if probe_ok then
           gmp = lib
@@ -573,7 +578,10 @@ local function solve(p)
         if b_s == '0' then cleanup(); return { status = 'Error', message = 'division by zero' } end
         q = ffi.new('mpz_t[1]'); g.__gmpz_init(q)
         r = ffi.new('mpz_t[1]'); g.__gmpz_init(r)
-        g.__gmpz_sdiv_qr(q, r, a, b)
+        -- __gmpz_tdiv_qr = 向零截断（C 的 / 和 % 语义，余数符号随被除数）。
+        -- 勿用 __gmpz_sdiv_qr：只是历史别名，标准 libgmp 共享库构建（Debian/macOS）
+        -- 不导出，执行时 undefined symbol（issue #4）。
+        g.__gmpz_tdiv_qr(q, r, a, b)
         out.result = num_to_str(g, q)
         out.remainder = num_to_str(g, r)
       elseif op == 'mod' then

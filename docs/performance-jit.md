@@ -53,7 +53,10 @@ LuaJIT 对部分构造 **不做 trace 编译**（NYI, Not Yet Implemented），�
 - `pcall`/`error` 包住热路径
 - 字符串拼接 `..` 在超紧循环里（适度使用没问题）
 
-诊断：`require('jit').status()` 查开关；进阶用 `jit.dump`/`-jv` 观察 trace 生成与 abort 原因。
+诊断：`SELECT luajit_jit_info()`（主仓 v0.5+，每线程 TLS 状态）返回 `{"jit":true,"traces":N}`——
+N 是该线程已记录的 trace 数。注意语义：**NYI 循环也会记录 trace（随后 abort 回解释器）**，
+所以「traces 增长」证明代码变热了，但不能单凭它证明在编译执行；确诊 NYI 用
+`luajit -jv` 跑同款 Lua 观察 `[trace abort]` 日志，或对比 JIT on/off 计时（零差距 = 零 JIT）。
 
 ## 陷阱二：DuckDB 常量折叠会伪造基准
 

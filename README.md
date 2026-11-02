@@ -121,6 +121,8 @@ SELECT * FROM luajit_module(mode := 'compile', sql_name := 'etl_demo',
 
 ## Contributing a Library (categorization rules)
 
+> **性能必读**：[docs/performance-jit.md](docs/performance-jit.md) — 什么时候你的 Lua 跑在 JIT 上（批进批出、循环留 Lua，快 ~10×），什么时候静默退解释器（逐行调用 / NYI 构造），以及基准测量的两个陷阱（常量折叠、STRUCT vs JSON 字符串）。
+
 1. **Pick the right category**: data source (reads external data) → `datasource/`; data-structure parsing → `parser/`;
    scalar functions → `udf/`; network/API → `network/`; C library bindings → `ffi/`
 2. **Header metadata** (`-- @key: value`, fixed format, scanned by future index tooling):

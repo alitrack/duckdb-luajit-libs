@@ -1,6 +1,6 @@
 # fun.lua PoC output (regenerated after A/B bench)
 # date: 2026-11-09T08:57:38Z
-# duckdb: 
+# duckdb: v2.0.0-alpha39998 (Cyanoptera) a00803f768
 # command: duckdb -unsigned -f libs/udf/test_fun.sql
 
 ┌─────────┬───────────────┬───────────────┬─────────┬────────────────────────────────────────────────────────┬──────────┐

@@ -64,3 +64,4 @@ bignum|libs/udf/bignum.lua|5a2df05ad6fa64add791dde5b5922fc7d5dae7ea81c824e0130df
 basexx|libs/udf/basexx.lua|2f5041eecddc131c83f164d06567e70f4dd1bfcef94ceef6de90394e2fb05498|d7c8404
 soundex|libs/udf/soundex.lua|5822d6d64684eedef8bab832562d6d2750c5a86b28880a5b3eee0584f5cbba13|d7c8404
 zlib|libs/udf/zlib.lua|630e4522260919bf549f1cb6db4fb14e4e26db26c44b0db02750ecf286f309f4|d7c8404
+fun|libs/udf/fun.lua|67e27272185c71a3136077f4fc6ddb97f9d1d1a3c0c2fca9519e0ac3f508b602|26ae8d5

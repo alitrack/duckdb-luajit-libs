@@ -1,0 +1,33 @@
+# PoC: rbac v4 — [OK ]  DENY (want DENY ) default-deny: unlisted table
+  [OK ]  DENY (want DENY ) default-deny: unlisted (not granted)
+  [OK ]  DENY (want DENY ) view wraps protected
+  [OK ]  DENY (want DENY ) transitive view
+  [OK ] ALLOW (want ALLOW) granted reads via view
+  [OK ] ALLOW (want ALLOW) granted reads transitive view
+  [OK ] ALLOW (want ALLOW) granted reads view over public
+  [OK ]  DENY (want DENY ) file fn read_parquet
+  [OK ]  DENY (want DENY ) file fn read_csv
+  [OK ]  DENY (want DENY ) file fn read_text
+  [OK ]  DENY (want DENY ) file fn st_read
+  [OK ]  DENY (want DENY ) file fn sqlite_scan
+  [OK ]  DENY (want DENY ) file fn iceberg_scan
+  [OK ]  DENY (want DENY ) file fn httpfs
+  [OK ]  DENY (want DENY ) file fn (UPPER)
+  [OK ]  DENY (want DENY ) sqlite metadata dump
+  [OK ]  DENY (want DENY ) sqlite_schema dump
+  [OK ]  DENY (want DENY ) RBAC meta: tokens
+  [OK ]  DENY (want DENY ) RBAC meta: perms
+  [OK ]  DENY (want DENY ) protected (UPPER case)
+  [OK ]  DENY (want DENY ) protected (quoted)
+  [OK ] ALLOW (want ALLOW) schema-qualified granted
+  [OK ]  DENY (want DENY ) CTE over ungranted
+  [OK ] ALLOW (want ALLOW) CTE over granted
+  [OK ] ALLOW (want ALLOW) viewer legit read
+  [OK ] ALLOW (want ALLOW) viewer aggregate
+  [OK ] ALLOW (want ALLOW) analyst direct read
+  [OK ] authn no-overwrite (sid stays 'bob' after alice-token reuse)
+
+RESULT: 28/28 checks passed, 0 failed
+
+# env: duckdb 1.5.6 + community luajit ext; runner: libs/security/test_rbac.py (28 checks)
+# exit=0

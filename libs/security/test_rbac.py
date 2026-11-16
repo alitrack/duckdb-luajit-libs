@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""rbac 回归（duckdb-luajit-libs，v4 引擎）—— 跑法: .venv/bin/python libs/security/test_rbac.lua
+"""rbac 回归（duckdb-luajit-libs，v4 引擎）—— 跑法: .venv/bin/python libs/security/test_rbac.py
 
 覆盖:
   - default-deny 全目录(未列名表对任何已认证用户拒读)
@@ -23,10 +23,9 @@ con.execute("SELECT luajit_s('rbac', {op:'setup'})")
 def ab(b):
     return bool(b) if isinstance(b, bool) else (b == "true")
 
-con.execute("CREATE TABLE secret_data(id INT) VALUES (1)")
-con.execute("CREATE TABLE public_data(id INT) VALUES (1)")
-con.execute("CREATE TABLE other_data(id INT) VALUES (1)")
-con.execute("CREATE TABLE sneaky_table(id INT) VALUES (1)")           # NOT protected-listed
+for t in ("secret_data","public_data","other_data","sneaky_table"):
+    con.execute(f"CREATE TABLE {t}(id INT)")
+    con.execute(f"INSERT INTO {t} VALUES (1)")
 con.execute("CREATE VIEW v_secret AS SELECT * FROM secret_data")
 con.execute("CREATE VIEW v_of_v AS SELECT * FROM v_secret")
 con.execute("CREATE VIEW v_pub AS SELECT * FROM public_data")
@@ -75,8 +74,8 @@ for sid, sql, want, label in CASES:
     passed += ok
     print(f"  [{'OK ' if ok else 'BAD'}] {'ALLOW' if got else 'DENY':>5} (want {'ALLOW' if want else 'DENY':<5}) {label}")
 
-# authn: an existing session mapping must NOT be overwritten (SID-takeover guard)
-con.execute("INSERT INTO quack_sessions VALUES ('sid-bob','bob')")
+# authn: an existing session mapping must NOT be overwritten (SID-takeover guard):
+# alice's token authenticates but must not re-bind sid-bob to 'alice'
 r1 = con.execute("SELECT luajit_s('rbac', {op:'authn', sid:'sid-bob', client_token:'alice-tok', server_token:'x'})").fetchone()[0]
 r2 = con.execute("SELECT user_name FROM quack_sessions WHERE sid='sid-bob'").fetchone()[0]
 ok = ab(r1) and r2 == 'bob'

@@ -3,6 +3,8 @@
 -- 断言查询全部"应为 0"（除显式标注的对照/展示查询），任一行非 0 即回归失败。
 
 LOAD '/mnt/d/wsl2/luajit/build/release/luajit.duckdb_extension';
+-- 注：install 走 ~/.duckdb/luajit-libs 缓存。运行本文件前应先同步缓存：
+--   cp /mnt/d/wsl2/duckdb-luajit-libs/libs/privacy/privacy.lua ~/.duckdb/luajit-libs/privacy.lua
 SELECT * FROM luajit_module(mode := 'install', sql_name := 'privacy');
 
 -- ============================================================
@@ -290,3 +292,60 @@ SELECT COUNT(*) AS p2_note_missing_must_be_0
 FROM (SELECT luajit_s('privacy', {'op':'redact_text','v':'任意文本'}) AS j)
 WHERE json_extract_string(j, '$.note') IS NULL
    OR json_extract_string(j, '$.note') NOT LIKE '%not guaranteed%';
+
+-- 断言 29：空格卡号 4-4-4-4 形态命中（P2 补的分组形态）+ 连续 16 位回归
+SELECT COUNT(*) AS spaced_card_must_be_0
+FROM (SELECT json_extract_string(luajit_s('privacy', {'op':'redact_text','v':'卡 4111 1111 1111 1111'}), '$.text') AS t)
+WHERE t <> '卡 [**ACCT**]';
+SELECT COUNT(*) AS cont_card_must_be_0
+FROM (SELECT json_extract_string(luajit_s('privacy', {'op':'redact_text','v':'卡 4111111111111111'}), '$.text') AS t)
+WHERE t <> '卡 [**ACCT**]';
+
+-- ============================================================
+-- 五、FPE：FF3-1/FF3（确定性可逆 PII 掩码）+ 卡号 Luhn 保持 + token
+-- ============================================================
+-- 断言 30：FF3-1 NIST 官方向量（3992520240 → 8901801106）
+SELECT COUNT(*) AS fpe_nist_must_be_0 FROM (SELECT 1)
+WHERE json_extract_string(luajit_s('privacy', {'op':'fpe_encode',
+  'v':'3992520240', 'key':'2DE79D232DF5585D68CE47882AE256D6',
+  'tweak':'CBD09280979564', 'algo':'ff31'}), '$.value') <> '8901801106';
+
+-- 断言 31：56 位长向量（M=10^28 > 2^64）加密 + 解密往返（抓 to12be 精度类 bug 的回归网）
+WITH e AS (
+  SELECT json_extract_string(luajit_s('privacy', {'op':'fpe_encode',
+    'v':'60761757463116869318437658042297305934914824457484538562',
+    'key':'01C63017111438F7FC8E24EB16C71AB5', 'tweak':'C4E822DCD09F27', 'algo':'ff31'}), '$.value') AS ct
+)
+SELECT COUNT(*) AS fpe_longroundtrip_must_be_0 FROM e
+WHERE ct <> '35637144092473838892796702739628394376915177448290847293'
+   OR json_extract_string(luajit_s('privacy', {'op':'fpe_decode',
+      'v':ct, 'key':'01C63017111438F7FC8E24EB16C71AB5', 'tweak':'C4E822DCD09F27', 'algo':'ff31'}), '$.value')
+      <> '60761757463116869318437658042297305934914824457484538562';
+
+-- 断言 32：卡号 Luhn 保持——输出 16 位且 Luhn-valid（mod 10 == 0）
+-- 16 位 1-based：奇数 position 翻倍（d2/d4/… 从右数翻倍位）
+WITH c AS (
+  SELECT json_extract_string(luajit_s('privacy', {'op':'fpe_luhn',
+    'v':'4111111111111111', 'key':'000102030405060708090A0B0C0D0E0F'}), '$.value') AS v
+),
+chk AS (
+  SELECT c.v,
+         sum(CASE WHEN p % 2 = 1 THEN
+               (CASE WHEN cast(substr(c.v, p, 1) AS INT) * 2 > 9
+                     THEN cast(substr(c.v, p, 1) AS INT) * 2 - 9
+                     ELSE cast(substr(c.v, p, 1) AS INT) * 2 END)
+               ELSE cast(substr(c.v, p, 1) AS INT) END) AS s
+  FROM c, unnest(range(1, 17)) AS u(p)
+  GROUP BY c.v
+)
+SELECT COUNT(*) AS fpe_luhn_must_be_0 FROM chk
+WHERE length(v) <> 16 OR s % 10 <> 0;
+
+-- 断言 33：token 确定性 + 可区分
+WITH t AS (
+  SELECT json_extract_string(luajit_s('privacy', {'op':'fpe_token','v':'alice@example.com'}), '$.token') AS a,
+         json_extract_string(luajit_s('privacy', {'op':'fpe_token','v':'alice@example.com'}), '$.token') AS b,
+         json_extract_string(luajit_s('privacy', {'op':'fpe_token','v':'bob@example.com'}), '$.token') AS c
+)
+SELECT COUNT(*) AS fpe_token_must_be_0 FROM t
+WHERE a <> b OR a = c OR length(a) <> 16;

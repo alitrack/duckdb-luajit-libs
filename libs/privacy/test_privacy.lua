@@ -27,6 +27,55 @@ local h3 = f({v = 'Alice@example.com', salt = 's2', mode = 'hash', op = 'mask'})
 check('hash deterministic', h1, h2)
 ok('hash salt changes output', h1 ~= h3 and not h1:match('nan'))
 print("  hash(s1)=" .. h1 .. " hash(s2)=" .. h3)
+-- 锚 FPE: FF3-1/FF3 NIST 向量 + 长向量(56 位, M>2^64)往返 + 卡号 Luhn 保持 + token 确定性
+local function jtext(s)
+  -- 从 json_encode 的输出提取 "value" 字段（对象形式）；若无 value 字段则剥引号取整体
+  local v = tostring(s):match('"value"%s*:%s*"(.-)"')
+  if v then return v end
+  return (tostring(s):gsub('^%s*(.-)%s*$', '%1')):gsub('^"%s*',''):gsub('%s*"$',''):gsub('\\"','"')
+end
+check('FPE ff31 vec0 (NIST)',
+  jtext(f({v = '3992520240', key = '2DE79D232DF5585D68CE47882AE256D6', tweak = 'CBD09280979564',
+           algo = 'ff31', op = 'fpe_encode'})), '8901801106')
+check('FPE ff3 vec0 (NIST)',
+  jtext(f({v = '890121234567890000', key = 'EF4359D8D580AA4F7F036D6F04FC6A94', tweak = 'D8E7920AFA330A73',
+           algo = 'ff3', op = 'fpe_encode'})), '750918814058654607')
+local pt56 = '60761757463116869318437658042297305934914824457484538562'
+local ct56 = '35637144092473838892796702739628394376915177448290847293'
+check('FPE ff31 vec1 长56位 (NIST)',
+  jtext(f({v = pt56, key = '01C63017111438F7FC8E24EB16C71AB5', tweak = 'C4E822DCD09F27',
+           algo = 'ff31', op = 'fpe_encode'})), ct56)
+check('FPE ff31 长56位 解密往返',
+  jtext(f({v = ct56, key = '01C63017111438F7FC8E24EB16C71AB5', tweak = 'C4E822DCD09F27',
+           algo = 'ff31', op = 'fpe_decode'})), pt56)
+do
+  local card = '4111111111111111'
+  local cr = f({v = card, key = '000102030405060708090A0B0C0D0E0F', op = 'fpe_luhn'})
+  local cv = jtext(cr)
+  check('FPE 卡号长度 16', #cv, 16)
+  local function luhn_valid(d)
+    local sum, alt = 0, false
+    for i = #d, 1, -1 do
+      local x = tonumber(d:sub(i, i))
+      if alt then x = x * 2
+        if x > 9 then x = x - 9 end end
+      sum = sum + x; alt = not alt
+    end
+    return sum % 10 == 0
+  end
+  ok('FPE 卡号 Luhn 保持', luhn_valid(cv))
+  check('FPE 卡号确定性',
+    jtext(f({v = card, key = '000102030405060708090A0B0C0D0E0F', op = 'fpe_luhn'})), cv)
+end
+local function jfield(s, field)
+  local v = tostring(s):match('"' .. field .. '"%s*:%s*"(.-)"')
+  if v then return v end
+  return (tostring(s):gsub('^%s*(.-)%s*$', '%1')):gsub('^"%s*',''):gsub('%s*"$',''):gsub('\\"','"')
+end
+local t1 = jfield(f({v = 'alice@example.com', op = 'fpe_token'}), 'token')
+local t2 = jfield(f({v = 'alice@example.com', op = 'fpe_token'}), 'token')
+local t3 = jfield(f({v = 'bob@example.com', op = 'fpe_token'}), 'token')
+ok('FPE token 确定性+可区分', t1 == t2 and t1 ~= t3 and #t1 == 16)
 -- 锚 3: mask bin
 check('mask bin', f({v = '37', lo = 0, hi = 100, bins = 10, mode = 'bin', op = 'mask'}), '[30,40)')
 -- 锚 4: mask rand 确定性
@@ -345,6 +394,10 @@ check('P2 身份证末位X', jtext(f({op = 'redact_text', v = '11010119900307123
 check('P2 手机号', jtext(f({op = 'redact_text', v = '15912345678', dict = {}})), '[**PHONE**]')
 check('P2 银行卡16位', jtext(f({op = 'redact_text', v = '6222021234567890', dict = {}})), '[**ACCT**]')
 check('P2 银行卡19位', jtext(f({op = 'redact_text', v = '6222021234567890123', dict = {}})), '[**ACCT**]')
+check('P2 银行卡4-4-4-4空隔', jtext(f({op = 'redact_text', v = '卡 4111 1111 1111 1111', dict = {}})),
+  '卡 [**ACCT**]')
+check('P2 空隔卡号前后缀不碎', jtext(f({op = 'redact_text', v = '4111 1111 1111 1111x', dict = {}})),
+  '4111 1111 1111 1111x')
 
 -- 锚 25: 邮箱 / URL / IPv4（非法 IPv4 不误判）
 check('P2 邮箱', jtext(f({op = 'redact_text', v = 'a1+b2@x.co', dict = {}})), '[**EMAIL**]')

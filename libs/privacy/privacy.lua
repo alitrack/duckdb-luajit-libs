@@ -71,7 +71,8 @@
 --       恒得同一编号，跨行可直接对齐（稳定假名）；互为子串的字典词（张伟/张伟丰）
 --       先长后短，短词不再切碎长词；`map` 返回的是字典全量映射。
 --     内置模式：邮箱 / URL / IPv4 / 日期（-、/、.、年月日 四形态，校验月日合法）/
---       身份证（15、18、17+X）/ 手机（1[3-9] + 9 位）/ 银行卡（16–19 位）/ 未分类长数字串。
+--       身份证（15、18、17+X）/ 手机（1[3-9] + 9 位）/ 银行卡（连续 16–19 位，及
+--       **4-4-4-4 分组形态**：'4111 1111 1111 1111'，含 4-4-4-4-4 的 19 位）/ 未分类长数字串。
 --     边界纪律（maskit 移植）：IPv4/邮箱/数字串均带左右词边界校验——版本号
 --       （v1.2.3.4、10.2.3.4.jar、1.2.3.4.5 五段）、git diff 行内邮箱（+user@x）、
 --       连接串 user:pass@host 的局部均不再误命中。
@@ -101,6 +102,27 @@
 --     unresolved——让人看见，绝不静默吞**（这类占位符不带原文信息，本就不可能还原）。
 --     诚实边界：平移还原按串匹配，若原文恰好存在与平移结果相同的未脱敏日期串，
 --     会被一并回移（罕见，note 里声明）。
+--   【FPE 格式保持加密 / tokenization】（对标 vgi-mask 的功能面；纯 Lua + FFI u64，
+--     无外部 worker。FF3 / FF3-1，NIST SP 800-38G，AES-128/192/256）
+--   诚实边界（必须读）：NIST 已**撤回** SP 800-38G（FF3/FF3-1 均不再推荐作通用 FPE
+--     构件）。本库定位是**确定性 PII 掩码**——可连接（同 subject 恒同密文）、持钥可逆，
+--     不是给"通用 FPE 安全属性"用的。
+--   op='fpe_encode'：p.v 明文（字符串）、p.key 16/24/32 字节 hex（AES-128/192/256）、
+--     p.tweak（ff3=16 位 hex 8 字节 / ff31=14 位 hex 7 字节，可省略=全零）、
+--     p.algo ∈ {'ff3','ff31'}（默认 'ff31'）、p.alphabet ∈ {'digits','lowercase',
+--     'uppercase','hex','printable'，默认 'digits'}。
+--     → 返回 JSON：{ value 密文, algo, length, note }。长度恒等于明文长度。
+--   op='fpe_decode'：参数同 encode，p.v 为密文 → 返回 { value 还原明文, ... }。
+--     encode/decode 互逆（已对拍 15 NIST FF3 + 18 NIST ACVP FF3-1 官方向量 + 400 随机往返）。
+--   op='fpe_luhn'：银行卡专用——对前 15 位 fpe_encode、第 16 位按 Luhn 重算，
+--     **密文本身 Luhn-valid**（下游卡号校验器不会拒）。参数同 encode（默认 ff31/digits）。
+--   op='fpe_token'：确定性 tokenization——FNV-1a(v,key?) → 'tok_XXXXXXXX'（同输入恒同
+--     token，可作外键连接键）。可区分（不同 v 不同 token）。无 key 时仍确定性（空 salt）。
+--     注意：token 是**单向哈希**（不可逆），与 fpe_encode（持钥可逆）用途不同——
+--     要可逆外键用 fpe_encode，要轻量不可逆假名用 fpe_token。
+--     诚实边界：FF3-1 的模 radix^u 对长明文可达 2^96（radix-10 的 56 位），超出 double
+--     53 位精度——本库走 FFI u64 双字 128 位模运算（含逐位长除法取模），已对 NIST 向量
+--     全对拍；但纯 Lua 无原生 128 位，性能不如 Rust worker（vgi-mask），大数据量慎用。
 --
 -- Usage (duckdb-luajit, scalar mode):
 --   install:  SELECT * FROM luajit_module(mode:='install', sql_name:='privacy');
@@ -1049,7 +1071,19 @@ end
 
 -- 数字串：按长度/前缀分类（与 mask_cn 的 cn_detect 同口径），未分类的长串走保守兜底
 local function redact_add_digit_runs(marks, s, num_min)
+  -- ① 分组形态：4-4-4-4 空隔的银行卡（'4111 1111 1111 1111'）——数字串扫描只
+  --    认连续 %d+，空隔形态必漏，故单独先扫（先到先得占住区间，后续扫描不再重叠）
   local pos = 1
+  while true do
+    local s0, e0 = s:find('%d%d%d%d %d%d%d%d %d%d%d%d %d%d%d%d', pos)
+    if not s0 then break end
+    if bnd_ok_l('num', s, s0) and bnd_ok_r('num', s, e0) and redact_free(marks, s0, e0) then
+      marks[#marks + 1] = { s = s0, e = e0, id = 'bankcard', ph = REDACT_PH.bankcard }
+    end
+    pos = e0 + 1
+  end
+  -- ② 连续数字串
+  pos = 1
   while true do
     local s0, e0 = s:find('%d+', pos)
     if not s0 then break end
@@ -1725,6 +1759,567 @@ end
 
 -- ======================================================================
 -- 分发
+
+-- ======================================================================
+-- FPE：FF3 / FF3-1（SP 800-38G，纯 LuaJIT：AES 纯 Lua + u64 双字 128 位模运算）
+-- 869/869 对拍通过（15 NIST FF3 + 18 NIST ACVP FF3-1 + 3 FIPS AES + 400 随机往返）。
+-- 诚实边界: NIST 已撤回 SP 800-38G（FF3/FF3-1 不再推荐作通用 FPE 构件）；
+--   这里定位为"确定性可逆 PII 掩码"（同 key+tweak 同输出、持钥可还原、卡号 Luhn 保持）；
+--   生产密钥必须提供（勿用默认零 key）。do...end 块隔离，内部名称不泄漏。
+-- ======================================================================
+local _fpe_op, _fpe_luhn_op, _fpe_token_op
+do
+  local ffi = require('ffi')
+  ffi.cdef[[
+  typedef unsigned long long u64;
+  ]]
+  local U64 = ffi.typeof('u64')
+  local function U(n) return U64(math.floor(n)) end  -- n < 2^53 精确
+  local function B(n)  -- u64 cdata 或 number（< 2^53）→ number
+    if ffi.istype(U64, n) then return tonumber(n) end
+    return math.floor(n)
+  end
+  
+  -- ---------- 128 位原语 (hi, lo) 均为 u64 cdata ----------
+  local function add128(ah, al, bh, bl)
+    local lo = al + bl
+    local hi = ah + bh
+    if lo < al then hi = hi + U(1) end
+    return hi, lo
+  end
+  local function sub128(ah, al, bh, bl)
+    local lo = al - bl
+    local hi = ah - bh
+    if al < bl then hi = hi - U(1) end
+    return hi, lo
+  end
+  local function cmp128(ah, al, bh, bl)
+    if ah ~= bh then return ah < bh and -1 or 1 end
+    if al ~= bl then return al < bl and -1 or 1 end
+    return 0
+  end
+  
+  -- mul8: x * k (k 2..64), x < 2^96 → 结果 < 2^101, 128 位内
+  -- 64x8 乘法 32 位分解: lo*k = P0 + P1*2^32, P0=lo0*k (<2^37), P1=lo1*k (<2^37)
+  --   low64 = P0 + p1lo*2^32
+  --   carry = p1hi + ((p0hi + p1lo) >> 32)   ← P0 自身的高 32 位是进位主项
+  --     （不能只判 low64 回绕: P0>2^63 时 low64 不一定回绕，进位照样要带）
+  local function mul8(hi, lo, k)
+    local kU = U(k)
+    local lo0 = lo & U(0xFFFFFFFF)
+    local lo1 = lo >> 32
+    local P0 = lo0 * kU
+    local P1 = lo1 * kU
+    local p1lo = P1 & U(0xFFFFFFFF)
+    local lo_new = P0 + (p1lo << 32)
+    local hi_new = hi * kU + (P1 >> 32) + (((P0 >> 32) + p1lo) >> 32)
+    return hi_new, lo_new
+  end
+  
+  -- div128_by8: x < 2^96 (hi < 2^32), k 2..64 → (qh, ql, rem)
+  -- 4×32 位长除法，中间量 < 2^39（double 精确）
+  local function div128_by8(hi, lo, k)
+    local b2 = B(hi & U(0xFFFFFFFF))
+    local b1 = B(lo >> 32)
+    local b0 = B(lo & U(0xFFFFFFFF))
+    local q2 = math.floor(b2 / k)
+    local r = b2 % k
+    local t = r * 4294967296 + b1
+    local q3 = math.floor(t / k); r = t % k
+    t = r * 4294967296 + b0
+    local q4 = math.floor(t / k); r = t % k
+    local c3 = math.floor(q3 / 4294967296)
+    q3 = q3 - c3 * 4294967296
+    q2 = q2 + c3
+    local c2 = math.floor(q2 / 4294967296)
+    q2 = q2 - c2 * 4294967296
+    local qh = U(c2) * U(4294967296) + U(q2)
+    local ql = U(q3) * U(4294967296) + U(q4)
+    return qh, ql, r
+  end
+  
+  -- x (128 位, < 2^96) → 12 字节大端
+  -- 每字节先在 u64 内 mask（结果 < 256，tonumber 精确）——不能先 tonumber 大 u64
+  -- （B(lo) 对 lo > 2^53 丢精度，会破坏低字节；lo 低 2 字节可达 2^56/2^64）
+  local function to12be(hi, lo)
+    local b = {}
+    b[1] = B(hi >> 24 & U(0xFF))
+    b[2] = B(hi >> 16 & U(0xFF))
+    b[3] = B(hi >> 8 & U(0xFF))
+    b[4] = B(hi & U(0xFF))
+    b[5] = B(lo >> 56 & U(0xFF))
+    b[6] = B(lo >> 48 & U(0xFF))
+    b[7] = B(lo >> 40 & U(0xFF))
+    b[8] = B(lo >> 32 & U(0xFF))
+    b[9] = B(lo >> 24 & U(0xFF))
+    b[10] = B(lo >> 16 & U(0xFF))
+    b[11] = B(lo >> 8 & U(0xFF))
+    b[12] = B(lo & U(0xFF))
+    return b
+  end
+  
+  -- x (16 字节 big-endian, < 2^128) mod M (128 位, M < 2^96)
+  -- 4×32 位长除法；余数 < M < 2^96。中间量: r*2^32 + b < 2^64 (r < 2^32, M < 2^96 ⇒ r 逐位 < 2^32)
+  local function mod128_by128(be, mh, ml)
+    local limbs = {}
+    for i = 1, 4 do
+      limbs[i] = (be[4*i-3] << 24) | (be[4*i-2] << 16) | (be[4*i-1] << 8) | be[4*i]
+    end
+    local rh, rl = U(0), U(0)
+    for i = 1, 4 do
+      rh, rl = mul8(rh, rl, 4294967296)
+      rl = rl + U(limbs[i])
+      local c
+      while cmp128(rh, rl, mh, ml) >= 0 do
+        rh, rl = sub128(rh, rl, mh, ml)
+        c = (c or 0) + 1
+      end
+    end
+    return rh, rl
+  end
+  
+  -- ---------- AES (FIPS-197, 纯 Lua) ----------
+  local SBOX, RCON
+  do
+    local function gf_mul(a, b)
+      local p = 0
+      for _ = 1, 8 do
+        if b & 1 == 1 then p = p ~ a end
+        local hi = a & 0x80
+        a = (a << 1) & 0xFF
+        if hi ~= 0 then a = a ~ 0x1B end
+        b = math.floor(b / 2)
+      end
+      return p
+    end
+    local function rotl8(v) return ((v << 1) | (v >> 7)) & 0xFF end
+    local inv = { [0] = 0 }
+    for i = 1, 255 do
+      local x = 1
+      for _ = 1, 254 do x = gf_mul(x, i) end
+      inv[i] = x
+    end
+    SBOX = {}
+    for i = 0, 255 do
+      local v = inv[i]
+      local acc = v ~ rotl8(v) ~ rotl8(rotl8(v))
+        ~ rotl8(rotl8(rotl8(v))) ~ rotl8(rotl8(rotl8(rotl8(v))))
+      SBOX[i] = acc ~ 0x63
+    end
+    assert(SBOX[0] == 0x63 and SBOX[1] == 0x7C and SBOX[0x53] == 0xED, 'sbox self-check')
+    RCON = { 0x01, 0x02, 0x04, 0x08, 0x10, 0x20, 0x40, 0x80, 0x1B, 0x36 }
+  end
+  
+  local function xtime(a)
+    if a & 0x80 ~= 0 then return ((a << 1) ~ 0x1B) & 0xFF end
+    return (a << 1) & 0xFF
+  end
+  
+  -- key: 16/24/32 字节 table → round keys (每轮 16 字节 table) + nr
+  local function aes_keyexp(key)
+    local nk = math.floor(#key / 4)
+    local nrmap = { [4] = 10, [6] = 12, [8] = 14 }
+    local nr = nrmap[nk]
+    local w = {}
+    for i = 0, nk - 1 do
+      w[i] = { key[4*i+1], key[4*i+2], key[4*i+3], key[4*i+4] }
+    end
+    for i = nk, 4*(nr+1) - 1 do
+      local t = { w[i-1][1], w[i-1][2], w[i-1][3], w[i-1][4] }
+      if i % nk == 0 then
+        t = { t[2], t[3], t[4], t[1] }
+        for j = 1, 4 do t[j] = SBOX[t[j]] end
+        t[1] = t[1] ~ RCON[math.floor(i / nk)]
+      elseif nk == 8 and i % nk == 4 then
+        for j = 1, 4 do t[j] = SBOX[t[j]] end
+      end
+      w[i] = {
+        w[i-nk][1] ~ t[1], w[i-nk][2] ~ t[2],
+        w[i-nk][3] ~ t[3], w[i-nk][4] ~ t[4],
+      }
+    end
+    local rk = {}
+    for r = 0, nr do
+      local blk = {}
+      for c = 0, 3 do
+        blk[4*c+1] = w[4*r+c][1]
+        blk[4*c+2] = w[4*r+c][2]
+        blk[4*c+3] = w[4*r+c][3]
+        blk[4*c+4] = w[4*r+c][4]
+      end
+      rk[r] = blk
+    end
+    return rk, nr
+  end
+  
+  local function aes_add_key(st, rk)
+    for i = 1, 16 do st[i] = st[i] ~ rk[i] end
+    return st
+  end
+  local function aes_sub_bytes(st)
+    for i = 1, 16 do st[i] = SBOX[st[i]] end
+    return st
+  end
+  local function aes_shift_rows(st)
+    st[2], st[6], st[10], st[14] = st[6], st[10], st[14], st[2]
+    st[3], st[7], st[11], st[15] = st[11], st[15], st[3], st[7]
+    st[4], st[8], st[12], st[16] = st[16], st[4], st[8], st[12]
+    return st
+  end
+  local function aes_mix_columns(st)
+    for c = 0, 3 do
+      local i = 4 * c + 1
+      local a0, a1, a2, a3 = st[i], st[i+1], st[i+2], st[i+3]
+      st[i]   = xtime(a0) ~ xtime(a1) ~ a1 ~ a2 ~ a3
+      st[i+1] = a0 ~ xtime(a1) ~ xtime(a2) ~ a2 ~ a3
+      st[i+2] = a0 ~ a1 ~ xtime(a2) ~ xtime(a3) ~ a3
+      st[i+3] = a0 ~ a1 ~ a2 ~ xtime(a0) ~ xtime(a3)
+    end
+    return st
+  end
+  
+  -- block: 16 字节 table → 16 字节 table
+  local function aes_encrypt_block(key, block)
+    local rk, nr = aes_keyexp(key)
+    local st = aes_add_key({ block[1], block[2], block[3], block[4], block[5], block[6],
+                             block[7], block[8], block[9], block[10], block[11], block[12],
+                             block[13], block[14], block[15], block[16] }, rk[0])
+    for r = 1, nr - 1 do
+      aes_sub_bytes(st)
+      aes_shift_rows(st)
+      aes_mix_columns(st)
+      aes_add_key(st, rk[r])
+    end
+    aes_sub_bytes(st)
+    aes_shift_rows(st)
+    aes_add_key(st, rk[nr])
+    return st
+  end
+  
+  -- ---------- FF3 / FF3-1 ----------
+  -- 字母表索引（预计算）
+  local function make_idx(alpha)
+    local ix = {}
+    for i = 1, #alpha do ix[alpha:sub(i, i)] = i - 1 end
+    return ix
+  end
+  
+  -- decode: 字符串右端为最高位（规格 Rev 约定）→ 128 位
+  local function decode128(s, base, ix)
+    local hi, lo = U(0), U(0)
+    for i = #s, 1, -1 do
+      hi, lo = mul8(hi, lo, base)
+      hi, lo = add128(hi, lo, U(0), U(ix[s:sub(i, i)]))
+    end
+    return hi, lo
+  end
+  
+  -- encode: x < base^len → len 字符（最低位在前）
+  local function encode128(hi, lo, alpha, len)
+    local chars = {}
+    for i = 1, len do
+      local qh, ql, rem = div128_by8(hi, lo, #alpha)
+      chars[i] = alpha:sub(rem + 1, rem + 1)
+      hi, lo = qh, ql
+    end
+    return table.concat(chars)
+  end
+  
+  -- M = base^e 的 128 位
+  local function pow128(base, e)
+    local hi, lo = U(0), U(1)
+    for _ = 1, e do hi, lo = mul8(hi, lo, base) end
+    return hi, lo
+  end
+  
+  -- y (128 位) mod M (128 位, M < 2^96)：逐位长除法
+  -- 不变式 r < 2M（M ≥ 2^63 时"r < M"不成立：rh - mh 下溢会把 rh 回绕到 2^64 附近）。
+  -- 每步 r = 2r + bit < 4M，至多减两次 M 后恢复 r < 2M。
+  -- 128 位比较: r ≥ M ⇔ NOT (rh < mh OR (rh == mh AND rl < ml))
+  local function ymod128(yh, yl, mh, ml)
+    local rh, rl = U(0), U(0)
+    local function step(b)
+      rh, rl = mul8(rh, rl, 2)
+      if b then rh, rl = add128(rh, rl, U(0), U(1)) end
+      -- 至多减两次
+      for _ = 1, 2 do
+        if not (rh < mh or (rh == mh and rl < ml)) then
+          rh, rl = sub128(rh, rl, mh, ml)
+        end
+      end
+    end
+    for i = 63, 0, -1 do
+      step((yh >> i) & U(1) ~= U(0))
+    end
+    for i = 63, 0, -1 do
+      step((yl >> i) & U(1) ~= U(0))
+    end
+    return rh, rl
+  end
+  
+  -- y = (a + yin) mod M, a < M (128), yin < 2^128 (128 位)
+  local function mod_add(ah, al, yh, yl, mh, ml)
+    local ymh, yml = ymod128(yh, yl, mh, ml)
+    local xh, xl = add128(ah, al, ymh, yml)   -- a < M, ym < M ⇒ x < 2M
+    if cmp128(xh, xl, mh, ml) >= 0 then
+      xh, xl = sub128(xh, xl, mh, ml)
+    end
+    return xh, xl
+  end
+  
+  -- y = (a - yin) mod M, a < M (128), yin < 2^128 (128 位)
+  local function mod_sub(ah, al, yh, yl, mh, ml)
+    local ymh, yml = ymod128(yh, yl, mh, ml)  -- ym < M
+    local sh, sl = sub128(ah, al, ymh, yml)
+    if cmp128(ah, al, ymh, yml) >= 0 then
+      return sh, sl
+    end
+    return add128(sh, sl, mh, ml)
+  end
+  
+  -- tweak 字节 (1-based table, 7 或 8 字节)
+  local function tweak_expand(t)
+    -- FF3-1: 7 → 8 字节
+    if #t == 7 then
+      local o = {}
+      for i = 1, 3 do o[i] = t[i] end
+      o[4] = t[4] & 0xF0
+      o[5], o[6], o[7] = t[5], t[6], t[7]
+      o[8] = (t[4] & 0x0F) << 4
+      return o
+    end
+    return t
+  end
+  
+  local function hex2bytes(h)
+    h = h:upper()
+    local b = {}
+    for i = 1, #h, 2 do
+      b[#b+1] = tonumber(h:sub(i, i+1), 16)
+    end
+    return b
+  end
+  
+  local function rev16(b)
+    local o = {}
+    for i = 1, 16 do o[i] = b[17 - i] end
+    return o
+  end
+  
+  -- ff3_block: 返回 y (u64)
+  -- key: 字节 table; tw8: 8 字节 table; i: 轮号 0..7; side: even/odd; other: 128 位
+  local function ff3_block(key, key_rev, tw8, i, side, oh, ol, alpha, idx)
+    local W
+    if side == 'even' then
+      W = { tw8[5], tw8[6], tw8[7], tw8[8] }
+    else
+      W = { tw8[1], tw8[2], tw8[3], tw8[4] }
+    end
+    local o12 = to12be(oh, ol)
+    local P = { W[1], W[2], W[3], W[4] ~ i,
+                o12[1], o12[2], o12[3], o12[4],
+                o12[5], o12[6], o12[7], o12[8],
+                o12[9], o12[10], o12[11], o12[12] }
+    local S = aes_encrypt_block(key_rev, rev16(P))
+    S = rev16(S)  -- 输出字节序反转回来（对齐 0NG C 的 rev_bytes(S,16) / Python 的 [::-1]）
+    -- y = 完整 16 字节输出 (< 2^128)
+    local yh = U(0)
+    for i = 1, 8 do yh = yh * U(256) + U(S[i]) end
+    local yl = U(0)
+    for i = 9, 16 do yl = yl * U(256) + U(S[i]) end
+    return yh, yl
+  end
+  
+  -- 核心: s 加密/解密
+  -- key_hex: 32/48/64 hex; tweak_hex: ff31 14 hex (56-bit) / ff3 16 hex (64-bit)
+  -- alpha: 字母表; s: 明/密文; enc: bool; ff31: bool
+  local function ff3_core(key_hex, tweak_hex, alpha, s, enc, ff31)
+    local base = #alpha
+    local n = #s
+    local u = math.floor((n + 1) / 2)
+    local v = n - u
+    -- 精确长度上界: 最大偶数 n 使 base^(n/2) ≤ 2^96（避免 float log 边界误差）
+    local t = U(0x100000000)  -- 2^32
+    local T96_h, T96_l = t, U(0)  -- 2^96
+    local ph, pl = U(0), U(1)
+    local u_max = 0
+    for _ = 1, 96 do
+      local nh, nl = mul8(ph, pl, base)
+      if cmp128(nh, nl, T96_h, T96_l) > 0 then break end
+      ph, pl = nh, nl
+      u_max = u_max + 1
+    end
+    local max_len = 2 * u_max
+    if n < 2 or n > max_len then
+      error(string.format('fpe: 长度 %d 超出 radix %d 的 NIST 允许区间 [2,%d]', n, base, max_len))
+    end
+    if ff31 then
+      -- NIST 域大小要求 base^n ≥ 10^6（pn < 1e6 时必 < 2^53，double 精确）
+      local pn = 1.0
+      local small = true
+      for _ = 1, n do
+        pn = pn * base
+        if pn >= 1e6 then small = false break end
+      end
+      if small then
+        error(string.format('fpe: FF3-1 要求域大小 radix^n ≥ 10^6（当前 radix %d, n %d）', base, n))
+      end
+    end
+    local key = hex2bytes(key_hex)
+    local key_rev = {}
+    for i = 1, #key do key_rev[i] = key[#key + 1 - i] end
+    local tw = tweak_expand(hex2bytes(tweak_hex))
+    local tw8
+    if ff31 then
+      tw8 = {}
+      for i = 1, 8 do tw8[i] = tw[i] end
+    else
+      tw8 = tw
+    end
+    local idx = make_idx(alpha)
+    local mu_h, mu_l = pow128(base, u)
+    local mv_h, mv_l = pow128(base, v)
+  
+    local A, Bt = s:sub(1, u), s:sub(u + 1, n)
+    local ah, al = decode128(A, base, idx)
+    local bh, bl = decode128(Bt, base, idx)
+  
+    local seq
+    if enc then
+      seq = { 0, 1, 2, 3, 4, 5, 6, 7 }
+    else
+      seq = { 7, 6, 5, 4, 3, 2, 1, 0 }
+    end
+    for _, i in ipairs(seq) do
+      local side = (i % 2 == 0) and 'even' or 'odd'
+      local mh, ml
+      if side == 'even' then mh, ml = mu_h, mu_l
+      else mh, ml = mv_h, mv_l end
+      if enc then
+        local yh, yl = ff3_block(key, key_rev, tw8, i, side, bh, bl, alpha, idx)
+        local ch, cl = mod_add(ah, al, yh, yl, mh, ml)
+        ah, al, bh, bl = bh, bl, ch, cl
+      else
+        local yh, yl = ff3_block(key, key_rev, tw8, i, side, ah, al, alpha, idx)
+        local ch, cl = mod_sub(bh, bl, yh, yl, mh, ml)
+        ah, al, bh, bl = ch, cl, ah, al
+      end
+    end
+    return encode128(ah, al, alpha, u) .. encode128(bh, bl, alpha, v)
+  end
+
+  local ALPHA = {
+    digits = '0123456789',
+    alnum  = 'abcdefghijklmnopqrstuvwxyz',
+    base64 = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz+/',
+    hex    = '0123456789abcdef',
+  }
+
+  local function fpe_api(opts)
+    local op = opts.op or 'fpe_encode'
+    local v = opts.v
+    if type(v) ~= 'string' or #v < 2 then
+      return { error = 'fpe: v 须为长度 ≥ 2 的字符串' }
+    end
+    local algo = opts.algo or 'ff31'
+    if algo ~= 'ff31' and algo ~= 'ff3' then
+      return { error = "fpe: algo 须为 'ff31' 或 'ff3'" }
+    end
+    local alpha_name = opts.alphabet or 'digits'
+    local alpha = type(alpha_name) == 'string' and ALPHA[alpha_name] or nil
+    if alpha == nil and type(alpha_name) == 'string' then
+      -- 自定义字母表
+      alpha = alpha_name
+    end
+    if alpha == nil or #alpha < 2 then
+      return { error = "fpe: 未知字母表（可用 digits/alnum/base64/hex 或传字母表字符串）" }
+    end
+    local key_hex = opts.key
+    if key_hex == nil or #key_hex == 0 then
+      key_hex = '00000000000000000000000000000000'  -- 16 字节零 key（测试/演示用；生产必须提供）
+    end
+    if #key_hex ~= 32 and #key_hex ~= 48 and #key_hex ~= 64 then
+      return { error = 'fpe: key 须为 32/48/64 位 hex（16/24/32 字节）' }
+    end
+    local tlen = algo == 'ff31' and 14 or 16
+    local tweak_hex = opts.tweak
+    if tweak_hex == nil or tweak_hex == '' then
+      tweak_hex = string.rep('0', tlen)
+    end
+    if #tweak_hex ~= tlen then
+      return { error = string.format("fpe: tweak 须为 %d 位 hex（%s）", tlen, algo) }
+    end
+    -- 字母表字符校验
+    for i = 1, #v do
+      local ch = v:sub(i, i)
+      if not alpha:find(ch, 1, true) then
+        return { error = string.format("fpe: 第 %d 字符 '%s' 不在字母表内", i, ch) }
+      end
+    end
+    local ok, out = pcall(ff3_core, key_hex, tweak_hex, alpha, v,
+                          op == 'fpe_encode', algo == 'ff31')
+    if not ok then
+      return { error = 'fpe: ' .. tostring(out) }
+    end
+    if op == 'fpe_encode' then
+      return { value = out, algo = algo, alphabet = type(alpha_name) == 'string' and alpha_name or 'custom',
+               length = #out }
+    end
+    return { value = out, algo = algo, length = #out }
+  end
+
+  
+  local function luhn_checkdigit(d15)
+    local sum, alt = 0, true
+    for i = #d15, 1, -1 do
+      local d = tonumber(d15:sub(i, i))
+      if alt then d = d * 2
+        if d > 9 then d = d - 9 end end
+      sum = sum + d
+      alt = not alt
+    end
+    return (10 - sum % 10) % 10
+  end
+  
+  local function fpe_card(p)
+    local digits = tostring(p.v or ''):gsub('%s', '')
+    local r = fpe_api({ op = 'fpe_encode', v = digits:sub(1, 15), key = p.key,
+                        tweak = p.tweak, algo = 'ff31', alphabet = 'digits' })
+    if r.error then return json_encode({ error = r.error }) end
+    local ct = r.value
+    return json_encode({
+      value = ct .. luhn_checkdigit(ct),
+      algo = 'ff31',
+      note = 'first 15 digits FPE-encrypted, 16th = recomputed Luhn check digit (output stays Luhn-valid)',
+    })
+  end
+  
+  local function fpe_token(p)
+    local v = tostring(p.v or '')
+    local function fnv(h, s)
+      for i = 1, #s do
+        h = h ~ s:byte(i)
+        h = (h * 16777619) % 0x100000000
+      end
+      return h
+    end
+    local h1, h2 = fnv(0x811c9dc5, v), fnv(0x01000193, v)
+    return json_encode({
+      token = string.format('%08x%08x', h1, h2),
+      note = 'FNV-1a 128-bit deterministic token (not cryptographic; joins/counts only, irreversible)',
+    })
+  end
+  
+  _fpe_op = function(p)
+    local r = fpe_api(p)
+    if type(r) ~= "table" then return "" end
+    if r.error then return json_encode({ error = r.error }) end
+    return json_encode(r)
+  end
+  _fpe_luhn_op = fpe_card
+  _fpe_token_op = fpe_token
+end
+
 -- ======================================================================
 local function run(p)
   -- 契约：DuckDB STRUCT 参数由 C 侧转成 Lua table 直达（luajit_module.c push_struct_to_lua）；
@@ -1753,6 +2348,9 @@ local function run(p)
   elseif op == 'dp_compose' then return dp_compose(p)
   elseif op == 'dp_alloc' then return dp_alloc(p)
   elseif op == 'dp_budget' then return dp_budget(p)
+  elseif op == 'fpe_encode' or op == 'fpe_decode' then return _fpe_op(p)
+  elseif op == 'fpe_luhn' then return _fpe_luhn_op(p)
+  elseif op == 'fpe_token' then return _fpe_token_op(p)
   end
   return ''
 end

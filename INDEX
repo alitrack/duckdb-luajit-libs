@@ -65,3 +65,4 @@ basexx|libs/udf/basexx.lua
 soundex|libs/udf/soundex.lua
 zlib|libs/udf/zlib.lua
 fun|libs/udf/fun.lua
+vips|libs/ffi/vips.lua
